@@ -1,4 +1,7 @@
 
+0.03
+    - Changed to use PDFLib's bounding box implementation
+
 0.02
     - Added axpoint command line script
 

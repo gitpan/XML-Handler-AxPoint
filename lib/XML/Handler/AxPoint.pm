@@ -1,13 +1,13 @@
-# $Id: AxPoint.pm,v 1.7 2002/02/10 10:16:08 matt Exp $
+# $Id: AxPoint.pm,v 1.10 2002/02/14 17:27:58 matt Exp $
 
 package XML::Handler::AxPoint;
 use strict;
 
 use XML::SAX::Writer;
-use PDFLib 0.05;
+use PDFLib 0.09;
 
 use vars qw($VERSION);
-$VERSION = '0.02';
+$VERSION = '0.03';
 
 sub new {
     my $class = shift;
@@ -46,7 +46,7 @@ sub start_document {
     else {
         XML::SAX::Writer::Exception->throw({ Message => 'Unknown option for Output' });
     }
-    
+
     $self->{Encoder} = XML::SAX::Writer::NullConverter->new;
 
     # create PDF and set defaults
@@ -100,9 +100,9 @@ sub pop_bookmark {
 
 sub end_document {
     my ($self) = @_;
-    
+
     $self->{pdf}->finish;
-    
+
     $self->{Consumer}->output( $self->{pdf}->get_buffer );
     $self->{Consumer}->finalize;
 }
@@ -158,7 +158,7 @@ sub get_transition {
 sub playback_cache {
     my $self = shift;
     $self->{cache_trash} = [];
-    
+
     while (@{$self->{cache}}) {
         my $thing = shift @{$self->{cache}};
         my ($method, $node) = @$thing;
@@ -174,11 +174,11 @@ sub start_element {
 
     my $parent = $el->{Parent} = $self->{Current};
     $self->{Current} = $el;
-    
+
     if ($self->{cache_until}) {
         push @{$self->{cache}}, ["slide_start_element", $el];
     }
-    
+
     my $name = $el->{LocalName};
     if ($name eq 'slideshow') {
         $self->push_todo(sub { $self->new_page });
@@ -223,7 +223,7 @@ sub start_element {
     elsif ($name eq 'slide') {
         $self->run_todo; # might need to create slideset here.
         $self->{pdf}->end_page;
-        
+
         $self->{images} = [];
         # cache these events now...
         $self->{cache_until} = $el->{Name};
@@ -231,12 +231,12 @@ sub start_element {
     }
     elsif ($name eq 'point') {
     }
-    elsif ($name eq 'source_code') {
+    elsif ($name eq 'source_code' || $name eq 'source-code') {
     }
     elsif ($name eq 'image') {
         $self->gathered_text;
     }
-    elsif ($name eq 'i') {
+    elsif ($name eq 'i' || $name eq 'b') {
     }
     elsif ($name eq 'colour' || $name eq 'color') {
     }
@@ -247,10 +247,10 @@ sub start_element {
 
 sub end_element {
     my ($self, $el) = @_;
-    
+
     $el = $self->{Current};
     my $parent = $self->{Current} = $el->{Parent};
-    
+
     if ($self->{cache_until}) {
         push @{$self->{cache}}, ["slide_end_element", $el];
         if ($el->{Name} eq $self->{cache_until}) {
@@ -258,7 +258,7 @@ sub end_element {
             return $self->playback_cache;
         }
     }
-    
+
     my $name = $el->{LocalName};
     if ($name eq 'slideshow') {
         $self->run_todo;
@@ -269,16 +269,16 @@ sub end_element {
             my $title = $self->gathered_text;
             $self->push_todo(sub {
                 $self->{pdf}->set_font(face => $self->{title_font}, size => $self->{title_size});
-                
+
                 $self->push_bookmark( $self->{pdf}->add_bookmark(text => "Title", open => 1) );
-                
+
                 $self->{pdf}->print_boxed($title,
                     x => 20, y => 50, w => 570, h => 300, mode => "center");
-                
+
                 $self->{pdf}->print_line("") for (1..4);
 
                 my ($x, $y) = $self->{pdf}->get_text_pos();
-                
+
                 $self->{pdf}->set_font(face => $self->{subtitle_font}, size => $self->{subtitle_size});
 
                 # speaker
@@ -288,10 +288,10 @@ sub end_element {
                     $self->{pdf}->print_boxed($self->{metadata}{speaker},
                         x => 20, y => 40, w => 570, h => $y - 24, mode => "center");
                 }
-                
+
                 $self->{pdf}->print_line("");
                 (undef, $y) = $self->{pdf}->get_text_pos();
-                
+
                 # organisation
                 if ($self->{metadata}{organisation}) {
                     $self->{pdf}->add_link(link => $self->{metadata}{link},
@@ -303,7 +303,7 @@ sub end_element {
         }
         elsif ($parent->{LocalName} eq 'slideset') {
             my $title = $self->gathered_text;
-            
+
             $self->push_bookmark(
                 $self->{pdf}->add_bookmark(
                     text => $title,
@@ -312,7 +312,7 @@ sub end_element {
                     open => 1,
                 )
             );
-            
+
             $self->{pdf}->set_font(face => $self->{title_font}, size => $self->{title_size});
             $self->{pdf}->print_boxed($title,
                 x => 20, y => 50, w => 570, h => 200, mode => "center");
@@ -381,10 +381,6 @@ sub end_element {
     elsif ($name eq 'slide') {
         $self->run_todo;
     }
-    elsif ($name eq 'point') {
-    }
-    elsif ($name eq 'source_code') {
-    }
     elsif ($name eq 'image') {
         my $image = $self->gathered_text;
         my $image_ref = $self->{pdf}->load_image(
@@ -395,14 +391,7 @@ sub end_element {
         my $href = $el->{Attributes}{"{}href"}{Value};
         push @{$self->{images}}, [$scale, $image_ref, $href];
     }
-    elsif ($name eq 'i') {
-    }
-    elsif ($name eq 'color' || $name eq 'colour') {
-    }
-    else {
-        warn("Unknown tag: $name");
-    }
-    
+
     $self->{Current} = $parent;
 }
 
@@ -412,7 +401,7 @@ sub characters {
     if ($self->{cache_until}) {
         push @{$self->{cache}}, ["slide_characters", $chars];
     }
-    
+
     $self->{gathered_text} .= $chars->{Data};
 }
 
@@ -428,9 +417,9 @@ sub gathered_text {
 
 sub image {
     my ($pdf, $scale, $file_handle, $href) = @_;
-    
+
     $pdf->print_line("");
-    
+
     my ($x, $y) = $pdf->get_text_pos;
     
     my ($imgw, $imgh) = (
@@ -446,7 +435,7 @@ sub image {
             y => ($y - $imgh),
             scale => $scale);
     $pdf->add_link(link => $href, x => 20, y => $y - $imgh, w => 570, h => $imgh) if $href;
-    
+
     $pdf->set_text_pos($x, $y - $imgh);
 }
 
@@ -454,7 +443,7 @@ sub bullet {
     my ($self, $level) = @_;
 
     my $pdf = $self->{pdf};
-    
+
     my ($char, $size);
     if ($level == 1) {
         $char = "l";
@@ -468,19 +457,20 @@ sub bullet {
         $char = "p";
         $size = 14;
     }
-    
-    my $leading = $pdf->get_value("leading");
-    $pdf->set_value("leading", $leading + 4);
-    $pdf->set_value("leading", $leading + 20) if $level == 1;
-    
-    $pdf->print_line("");
-    
+
+    if ($level == 1) {
+        my ($x, $y) = $pdf->get_text_pos;
+        $y += 9;
+        $pdf->set_text_pos($x, $y);
+        $pdf->print_line("");
+    }
+
     my ($x, $y) = $pdf->get_text_pos;
-    
+
     if (!@{$self->{xindent}} || $level > $self->{xindent}[0]{level}) {
         unshift @{$self->{xindent}}, {level => $level, x => $x};
     }
-    
+
     $pdf->set_font(face => "ZapfDingbats", size => $size - 4, encoding => "builtin");
     $pdf->print($char);
     $pdf->set_font(face => "Helvetica", size => $size);
@@ -522,7 +512,7 @@ sub slide_start_element {
     my ($self, $el) = @_;
 
     $self->{SlideCurrent} = $el;
-    
+
     my $name = $el->{LocalName};
 
     # transitions...
@@ -542,7 +532,7 @@ sub slide_start_element {
             $self->{transitional} = 0;
         }
     }
-    
+
     if ($name eq 'slide') {
         $self->new_page;
         $self->{image_id} = 0;
@@ -550,28 +540,20 @@ sub slide_start_element {
         $self->{spot_colour_name} = "a";
         # if we do bullet/image transitions, make sure new pages don't use a transition
         $el->{Attributes}{"{}transition"}{Value} = "replace";
-        $self->{pdf}->set_text_pos(60, 500);
+        # $self->{pdf}->set_text_pos(60, 500);
     }
     elsif ($name eq 'title') {
         $self->gathered_text; # reset
         $self->{chars_ok} = 1;
-        $self->push_todo( sub {
-                $self->{pdf}->set_font(
-                    face => $self->{title_font}, 
+        my $bb = $self->{pdf}->new_bounding_box(
+        	x => 5, y => 400, w => 602, h => 50,
+            align => "centre",
+            );
+        $self->{bb} = $bb;
+        $bb->set_font(
+                    face => $self->{title_font},
                     size => $self->{title_size},
                 );
-            });
-        # set the font anyway for layout
-        $self->{pdf}->set_font(
-            face => $self->{title_font}, 
-            size => $self->{title_size},
-        );
-        $self->{xpos} = 306; # exact centre of a slide
-        $self->{ypos} = 400;
-        $self->{cur_width} = 0;
-        $self->{align} = "centre";
-        $self->{max_width} = 612;
-        $self->{pdf}->set_text_pos($self->{xpos}, $self->{ypos});
     }
     elsif ($name eq 'i') {
         my $prev = $self->{pdf}->get_parameter("fontname");
@@ -584,10 +566,7 @@ sub slide_start_element {
             }
         }
         push @{$self->{font_stack}}, $prev;
-        $self->{pdf}->set_font(face => $new, italic => 1, bold => $bold);
-        $self->push_todo( sub {
-            $self->{pdf}->set_font(face => $new, italic => 1, bold => $bold);
-        });
+        $self->{bb}->set_font(face => $new, italic => 1, bold => $bold);
     }
     elsif ($name eq 'b') {
         my $prev = $self->{pdf}->get_parameter("fontname");
@@ -600,10 +579,7 @@ sub slide_start_element {
             }
         }
         push @{$self->{font_stack}}, $prev;
-        $self->{pdf}->set_font(face => $new, italic => $italic, bold => 1);
-        $self->push_todo(sub { 
-            $self->{pdf}->set_font(face => $new, italic => $italic, bold => 1);
-        });
+        $self->{bb}->set_font(face => $new, italic => $italic, bold => 1);
     }
     elsif ($name eq 'point') {
         $self->{chars_ok} = 1;
@@ -620,17 +596,18 @@ sub slide_start_element {
                 }
             }
         }
-        
+
         if ($level == 1) {
             $self->{pdf}->set_text_pos(80, $y);
         }
-        
+
         my $size = $self->bullet($level);
-        
-        ($self->{xpos}, $self->{ypos}) = $self->{pdf}->get_text_pos;
-        $self->{cur_width} = 0;
-        $self->{align} = "left";
-        $self->{max_width} = 600 - $self->{xpos};
+
+        ($x, $y) = $self->{pdf}->get_text_pos;
+        my $bb = $self->{pdf}->new_bounding_box(
+        	x => $x, y => $y, w => (612 - $x), h => (450 - $y)
+        );
+        $self->{bb} = $bb;
     }
     elsif ($name eq 'image') {
         my $image = $self->{images}[$self->{image_id}];
@@ -640,9 +617,13 @@ sub slide_start_element {
     elsif ($name eq 'source_code' || $name eq 'source-code') {
         my $size = $el->{Attributes}{"{}fontsize"}{Value} || 14;
         $self->{chars_ok} = 1;
-        $self->{fixed_font} = 1;
-        $self->{pdf}->set_font(face => "Courier", size => $size);
-        $self->{pdf}->print_line("");
+		$self->{pdf}->set_font(face => "Courier", size => $size);
+        my ($x, $y) = $self->{pdf}->get_text_pos;
+        my $bb = $self->{pdf}->new_bounding_box(
+        	x => $x, y => $y, w => (612 - $x), h => (450 - $y),
+            wrap => 0,
+        );
+        $self->{bb} = $bb;
     }
     elsif ($name eq 'color' || $name eq 'colour') {
         my $hex_colour;
@@ -661,18 +642,15 @@ sub slide_start_element {
         if ($hex_colour !~ /^[0-9a-fA-F]{6}$/) {
             die "Invalid hex format: $hex_colour";
         }
-        
+
         my ($r, $g, $b) = map { hex()/255 } ($hex_colour =~ /(..)/g);
-        
-        my $old_colour = $self->{pdf}->make_spot_color(
-                $self->{spot_colour_name}, 
+
+        my $old_colour = $self->{bb}->make_spot_color(
+                $self->{spot_colour_name},
             );
         $self->{spot_colour_name}++;
         push @{$self->{spot_colours}}, $old_colour;
-        $self->{pdf}->set_colour(rgb => [$r,$g,$b]);
-        $self->push_todo( sub {
-            $self->{pdf}->set_colour(rgb => [$r,$g,$b]);
-        });
+        $self->{bb}->set_color(rgb => [$r,$g,$b]);
     }
 }
 
@@ -680,23 +658,20 @@ sub slide_end_element {
     my ($self, $el) = @_;
 
     my $name = $el->{LocalName};
-    
+
     $el = $self->{SlideCurrent};
     $self->{SlideCurrent} = $el->{Parent};
-    
-    if ($name eq 'title' || $name eq 'point') {
-        # output last line
-        my $xpos = $self->{align} eq 'centre' ? 
-                        $self->{xpos} - ($self->{cur_width}/2)
-                        :
-               $self->{align} eq 'right' ?
-                        $self->{xpos} - $self->{cur_width}
-                        :
-                        $self->{xpos};
-        $self->{pdf}->set_text_pos($xpos, $self->{ypos});
-        $self->run_todo;
+
+    if ($name eq 'title' || $name eq 'point' || $name eq 'source-code'
+    	|| $name eq 'source_code') {
+        # finish bounding box
+        $self->{bb}->finish;
+        my ($x, $y) = $self->{bb}->get_text_pos;
+        $self->{pdf}->set_text_pos($self->{bb}->{x}, $y - 4);
+        delete $self->{bb};
+        $self->{pdf}->print_line("");
     }
-    
+
     if ($name eq 'title') {
         # create bookmarks
         if (!$self->{transitional}) {
@@ -712,7 +687,7 @@ sub slide_end_element {
         my ($x, $y) = $self->{pdf}->get_text_pos();
         $self->{pdf}->add_link(
             link => $el->{Attributes}{"{}href"}{Value},
-            x => 20, y => $y - 5, 
+            x => 20, y => $y - 5,
             w => 570, h => 24) if exists($el->{Attributes}{"{}href"});
 
         $self->{pdf}->set_text_pos(60, $y);
@@ -723,14 +698,12 @@ sub slide_end_element {
     }
     elsif ($name eq 'i' || $name eq 'b') {
         my $font = pop @{$self->{font_stack}};
-        $self->{pdf}->set_font(face => $font);
-        $self->push_todo( sub { $self->{pdf}->set_font(face => $font) } );
+        $self->{bb}->set_font(face => $font);
     }
     elsif ($name eq 'point') {
         $self->{chars_ok} = 0;
     }
     elsif ($name eq 'source_code' || $name eq 'source-code') {
-        $self->{fixed_font} = 0;
         $self->{chars_ok} = 0;
     }
     elsif ($name eq 'image') {
@@ -738,80 +711,23 @@ sub slide_end_element {
     }
     elsif ($name eq 'colour' || $name eq 'color') {
         my $old_colour = pop @{$self->{spot_colours}};
-        $self->{pdf}->set_colour( spot => { handle => $old_colour, tint => 1 } );
-        $self->push_todo( sub {
-            $self->{pdf}->set_colour(
-                spot => { handle => $old_colour, tint => 1 } 
-            );
-        });
+        $self->{bb}->set_colour( spot => { handle => $old_colour, tint => 1 } );
     }
 }
 
 sub slide_characters {
     my ($self, $chars) = @_;
 
+    return unless $self->{chars_ok};
+
     $self->{gathered_text} .= $chars->{Data};
 
     my $name = $self->{SlideCurrent}->{LocalName};
     my $text = $chars->{Data};
     return unless $text;
-    
-    return unless $self->{chars_ok};
-    
-    if ($self->{fixed_font}) {
-        # ignore wrapping issues
-        my @lines = split(/\n/, $text, -1);
-        my $last = pop @lines;
-        for my $line (@lines) {
-            # warn("print_line($line)\n");
-            $self->{pdf}->print($line);
-            $self->{pdf}->print_line("");
-        }
-        # warn("print($last)\n");
-        $self->{pdf}->print($last) if length($last);
-        return;
-    }
-    
-    my $width = $self->{pdf}->string_width(text => $text);
-    if (($width + $self->{cur_width}) <= $self->{max_width}) {
-        $self->{cur_width} += $width;
-        $self->push_todo( sub { $self->{pdf}->print($text) } );
-    }
-    else {
-        while (length($text)) {
-            $text =~ s/^(\S*\s*)// or last; # get a word+whitespace
-            my $word = $1;
-            my $width = $self->{pdf}->string_width(text => $word);
-            if (($width + $self->{cur_width}) <= $self->{max_width}) {
-                $self->{cur_width} += $width;
-                $self->push_todo( sub { $self->{pdf}->print($word) } );
-            }
-            else { # goes over the line
-                # print prev line.
-                my $xpos = $self->{align} eq 'centre' ? 
-                                $self->{xpos} - ($self->{cur_width}/2)
-                                :
-                           $self->{align} eq 'right' ?
-                                $self->{xpos} - $self->{cur_width}
-                                :
-                                $self->{xpos}; # assume left align
-                $self->{pdf}->set_text_pos($xpos, $self->{ypos});
-                $self->run_todo;
-                
-                # get ready for next line
-                my $font = $self->{pdf}->get_parameter("fontname");
-                $self->{pdf}->print_line("");
-                (undef, $self->{ypos}) = $self->{pdf}->get_text_pos;
-                
-                $self->{pdf}->set_font(face => $font);
-                $self->push_todo( sub {
-                    # add to this (new) line.
-                    $self->{pdf}->set_font(face => $font);
-                    $self->{pdf}->print($word);
-                });
-                $self->{cur_width} = $width;
-            }
-        }
+    my $leftover = $self->{bb}->print($text);
+    if ($leftover) {
+    	die "Could not print: $leftover\n";
     }
 }
 
@@ -835,7 +751,7 @@ Or using directly:
 
   use XML::SAX;
   use XML::Handler::AxPoint;
-  
+
   my $parser = XML::SAX::ParserFactory->parser(
   	Handler => XML::Handler::AxPoint->new(
   		Output => "presentation.pdf"
