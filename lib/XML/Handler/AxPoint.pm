@@ -1,4 +1,4 @@
-# $Id: AxPoint.pm,v 1.10 2002/02/14 17:27:58 matt Exp $
+# $Id: AxPoint.pm,v 1.12 2002/02/20 22:10:57 matt Exp $
 
 package XML::Handler::AxPoint;
 use strict;
@@ -7,12 +7,12 @@ use XML::SAX::Writer;
 use PDFLib 0.09;
 
 use vars qw($VERSION);
-$VERSION = '0.03';
+$VERSION = '0.04';
 
 sub new {
     my $class = shift;
     my $opt   = (@_ == 1)  ? { %{shift()} } : {@_};
-    
+
     $opt->{Output} ||= *{STDOUT}{IO};
 
     return bless $opt, $class;
@@ -62,7 +62,7 @@ sub start_document {
 
     $self->{subtitle_font} = "Helvetica-Bold";
     $self->{subtitle_size} = 20.0;
-    
+
     $self->{todo} = [];
     $self->{bookmarks} = [];
 }
@@ -536,8 +536,7 @@ sub slide_start_element {
     if ($name eq 'slide') {
         $self->new_page;
         $self->{image_id} = 0;
-        $self->{spot_colours} = [];
-        $self->{spot_colour_name} = "a";
+        $self->{colour_stack} = [[0,0,0]];
         # if we do bullet/image transitions, make sure new pages don't use a transition
         $el->{Attributes}{"{}transition"}{Value} = "replace";
         # $self->{pdf}->set_text_pos(60, 500);
@@ -546,7 +545,7 @@ sub slide_start_element {
         $self->gathered_text; # reset
         $self->{chars_ok} = 1;
         my $bb = $self->{pdf}->new_bounding_box(
-        	x => 5, y => 400, w => 602, h => 50,
+            x => 5, y => 400, w => 602, h => 50,
             align => "centre",
             );
         $self->{bb} = $bb;
@@ -605,7 +604,7 @@ sub slide_start_element {
 
         ($x, $y) = $self->{pdf}->get_text_pos;
         my $bb = $self->{pdf}->new_bounding_box(
-        	x => $x, y => $y, w => (612 - $x), h => (450 - $y)
+            x => $x, y => $y, w => (612 - $x), h => (450 - $y)
         );
         $self->{bb} = $bb;
     }
@@ -617,10 +616,10 @@ sub slide_start_element {
     elsif ($name eq 'source_code' || $name eq 'source-code') {
         my $size = $el->{Attributes}{"{}fontsize"}{Value} || 14;
         $self->{chars_ok} = 1;
-		$self->{pdf}->set_font(face => "Courier", size => $size);
+        $self->{pdf}->set_font(face => "Courier", size => $size);
         my ($x, $y) = $self->{pdf}->get_text_pos;
         my $bb = $self->{pdf}->new_bounding_box(
-        	x => $x, y => $y, w => (612 - $x), h => (450 - $y),
+            x => $x, y => $y, w => (612 - $x), h => (450 - $y),
             wrap => 0,
         );
         $self->{bb} = $bb;
@@ -636,7 +635,7 @@ sub slide_start_element {
             $hex_colour = $el->{Attributes}{"{}rgb"}{Value};
         }
         if (!$hex_colour) {
-            die "Missing colour attribute: name or rgb";
+            die "Missing colour attribute: name or rgb (found: " . join(', ', keys(%{$el->{Attributes}})) .")";
         }
         $hex_colour =~ s/^#//;
         if ($hex_colour !~ /^[0-9a-fA-F]{6}$/) {
@@ -645,11 +644,7 @@ sub slide_start_element {
 
         my ($r, $g, $b) = map { hex()/255 } ($hex_colour =~ /(..)/g);
 
-        my $old_colour = $self->{bb}->make_spot_color(
-                $self->{spot_colour_name},
-            );
-        $self->{spot_colour_name}++;
-        push @{$self->{spot_colours}}, $old_colour;
+        push @{$self->{colour_stack}}, [$r,$g,$b];
         $self->{bb}->set_color(rgb => [$r,$g,$b]);
     }
 }
@@ -663,7 +658,7 @@ sub slide_end_element {
     $self->{SlideCurrent} = $el->{Parent};
 
     if ($name eq 'title' || $name eq 'point' || $name eq 'source-code'
-    	|| $name eq 'source_code') {
+        || $name eq 'source_code') {
         # finish bounding box
         $self->{bb}->finish;
         my ($x, $y) = $self->{bb}->get_text_pos;
@@ -710,8 +705,8 @@ sub slide_end_element {
         $self->{image_id}++;
     }
     elsif ($name eq 'colour' || $name eq 'color') {
-        my $old_colour = pop @{$self->{spot_colours}};
-        $self->{bb}->set_colour( spot => { handle => $old_colour, tint => 1 } );
+        pop @{$self->{colour_stack}};
+        $self->{bb}->set_colour( rgb => $self->{colour_stack}[-1] );
     }
 }
 
@@ -727,7 +722,7 @@ sub slide_characters {
     return unless $text;
     my $leftover = $self->{bb}->print($text);
     if ($leftover) {
-    	die "Could not print: $leftover\n";
+        die "Could not print: $leftover\n";
     }
 }
 
@@ -744,7 +739,7 @@ Using SAX::Machines:
 
   use XML::SAX::Machines qw(Pipeline);
   use XML::Handler::AxPoint;
-  
+
   Pipeline( XML::Handler::AxPoint->new() )->parse_uri("presentation.axp");
 
 Or using directly:
@@ -753,10 +748,10 @@ Or using directly:
   use XML::Handler::AxPoint;
 
   my $parser = XML::SAX::ParserFactory->parser(
-  	Handler => XML::Handler::AxPoint->new(
-  		Output => "presentation.pdf"
-  		)
-  	);
+      Handler => XML::Handler::AxPoint->new(
+          Output => "presentation.pdf"
+          )
+      );
   
   $parser->parse_uri("presentation.axp");
 

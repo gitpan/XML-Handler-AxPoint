@@ -1,4 +1,7 @@
 
+0.04
+    - Fixed changing colour when another colour is in effect
+
 0.03
     - Changed to use PDFLib's bounding box implementation
 

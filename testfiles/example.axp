@@ -19,7 +19,7 @@
     <point level="1">AxKit dynamic sites (XSP)</point>
     <point level="1">Advanced <colour name="red">AxKit</colour></point>
     <source_code>
-Foo!
+<color name="blue">Foo!</color>
     </source_code>
   </slide>
   
@@ -55,7 +55,7 @@ my $p = XML::Parser->new(
     </i>
 $p->parsefile("foo.xml");
 
-exit(0);
+<color name="green">exit(0);</color>
 
 sub start_tag {
   my ($expat, $tag, %attribs) = @_;

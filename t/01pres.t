@@ -1,5 +1,5 @@
 use Test;
-BEGIN { plan tests => 5 }
+BEGIN { plan tests => 4 }
 use XML::SAX;
 use XML::Handler::AxPoint;
 
@@ -14,7 +14,7 @@ ok($handler);
 my $parser = XML::SAX::ParserFactory->parser(Handler => $handler);
 ok($parser);
 
-ok($parser->isa("XML::SAX::PurePerl"));
+# ok($parser->isa("XML::SAX::PurePerl"));
 
 chdir("testfiles");
 
