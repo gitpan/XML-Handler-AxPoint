@@ -1,4 +1,7 @@
 
+0.02
+    - Added axpoint command line script
+
 0.01
     - Initial port from AxKit version
     - Enhancements including <i>, <b>, <color> support

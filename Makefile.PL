@@ -7,6 +7,7 @@ WriteMakefile(
     	XML::SAX => 0.09,
     	XML::SAX::Writer => 0.39,
     },
+    EXE_FILES => [ 'scripts/axpoint' ],
     'ABSTRACT_FROM' => 'lib/XML/Handler/AxPoint.pm',
     'AUTHOR' => 'Matt Sergeant <matt@sergeant.org>',
 );

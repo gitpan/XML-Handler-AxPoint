@@ -14,7 +14,7 @@
   <slide transition="dissolve">
     <title>Introduction</title>
     <point level="1">Perl's XML Capabilities</point>
-    <point level="1">AxKit intro</point>
+    <point level="1">A long bullet point line for testing the line wrapping capabilities which should make this look OK</point>
     <point level="1">AxKit static sites</point>
     <point level="1">AxKit dynamic sites (XSP)</point>
     <point level="1">Advanced <colour name="red">AxKit</colour></point>

@@ -1,0 +1,15 @@
+#!/usr/bin/perl -w
+# $Id: axpoint,v 1.1 2002/02/06 17:47:54 matt Exp $
+
+use strict;
+use XML::Handler::AxPoint;
+use XML::SAX;
+
+my $source = shift(@ARGV) || die "No source file specified";
+my $output = shift (@ARGV) || \*STDOUT;
+
+XML::SAX::ParserFactory->parser(
+  Handler => XML::Handler::AxPoint->new(
+    Output => $output
+    )
+  )->parse_uri($source);

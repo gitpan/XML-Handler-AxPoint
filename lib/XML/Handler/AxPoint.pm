@@ -1,4 +1,4 @@
-# $Id: AxPoint.pm,v 1.6 2002/02/06 08:20:33 matt Exp $
+# $Id: AxPoint.pm,v 1.7 2002/02/10 10:16:08 matt Exp $
 
 package XML::Handler::AxPoint;
 use strict;
@@ -7,7 +7,7 @@ use XML::SAX::Writer;
 use PDFLib 0.05;
 
 use vars qw($VERSION);
-$VERSION = '0.01';
+$VERSION = '0.02';
 
 sub new {
     my $class = shift;

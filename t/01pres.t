@@ -1,5 +1,5 @@
 use Test;
-BEGIN { plan tests => 4 }
+BEGIN { plan tests => 5 }
 use XML::SAX;
 use XML::Handler::AxPoint;
 
@@ -7,8 +7,8 @@ use XML::Handler::AxPoint;
 
 my $output;
 
-my $handler = XML::Handler::AxPoint->new(Output => \$output);
-# my $handler = XML::Handler::AxPoint->new(Output => "foo.pdf");
+# my $handler = XML::Handler::AxPoint->new(Output => \$output);
+my $handler = XML::Handler::AxPoint->new(Output => "foo.pdf");
 ok($handler);
 
 my $parser = XML::SAX::ParserFactory->parser(Handler => $handler);
@@ -20,7 +20,7 @@ chdir("testfiles");
 
 $parser->parse_uri("example.axp");
 
-print substr($output, 0, 200), "\n";
+ok(-e "foo.pdf");
 
-ok($output);
+ok(-M _ < 0);
 
