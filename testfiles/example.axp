@@ -10,10 +10,10 @@
      <logo scale="0.4">ax_logo.png</logo>
      <background>redbg.png</background>
   </metadata>
-  
+
   <slide transition="dissolve">
-    <title>Introduction</title>
-    <point level="1">Perl's XML Capabilities</point>
+    <title href="http://www.xml.com/">Introduction</title>
+    <point level="1" href="http://xmlperl.com">Perl's XML Capabilities</point>
     <point level="1">A long bullet point line for testing the line wrapping capabilities which should make this look OK</point>
     <point level="1">AxKit static sites</point>
     <point level="1">AxKit dynamic sites (XSP)</point>
@@ -22,10 +22,45 @@
 <color name="blue">Foo!</color>
     </source_code>
   </slide>
-  
+
+  <slide>
+    <title>Table Example</title>
+    <table>
+        <row>
+            <col width="40%">
+                <source-code>
+Some code;
+in the
+
+++ first; # column
+
+that {
+  maybe we
+  want to comment();
+  on...
+}
+                </source-code>
+                <point>and a point here...</point>
+                <source-code>followed by more code</source-code>
+                <point>and another point</point>
+            </col>
+            <col width="60%">
+                <point>Notice how we did this...</point>
+                <point>And how we can add stuff over here!</point>
+                <source-code>include &lt;ing.h> //code</source-code>
+            </col>
+        </row>
+    </table>
+    <!-- Now some SVG! -->
+    <rect x="100" y="100" width="50" height="100" style="stroke: black"/>
+    <circle cx="50" cy="50" r="240"/>
+    <ellipse cx="100" cy="50" rx="30" ry="60" style="fill: aqua; stroke: red; stroke-width: 5"/>
+    <text x="200" y="200" style="stroke: black; fill: none; font: italic 24pt serif">A Cat</text>
+  </slide>
+
   <slideset>
      <title>XML with Perl Introduction</title>
-     
+
      <slide>
         <title>A very long <i>title that</i> should show how word <i>wrapping in the title</i> tag hopefully works properly today</title>
         <point level="1">SAX-like API</point>

@@ -3,7 +3,7 @@ WriteMakefile(
     'NAME' => 'XML::Handler::AxPoint',
     'VERSION_FROM' => 'lib/XML/Handler/AxPoint.pm',
     'PREREQ_PM' => {
-        'PDFLib' => 0.09,
+        'PDFLib' => 0.11,
     	'XML::SAX' => 0.09,
     	'XML::SAX::Writer' => 0.39,
     },

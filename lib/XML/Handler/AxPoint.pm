@@ -1,13 +1,13 @@
-# $Id: AxPoint.pm,v 1.13 2002/02/21 07:53:39 matt Exp $
+# $Id: AxPoint.pm,v 1.17 2002/03/07 23:29:11 matt Exp $
 
 package XML::Handler::AxPoint;
 use strict;
 
 use XML::SAX::Writer;
-use PDFLib 0.09;
+use PDFLib 0.11;
 
 use vars qw($VERSION);
-$VERSION = '1.01';
+$VERSION = '1.2';
 
 sub new {
     my $class = shift;
@@ -62,6 +62,8 @@ sub start_document {
 
     $self->{subtitle_font} = "Helvetica-Bold";
     $self->{subtitle_size} = 20.0;
+
+    $self->{normal_font} = "Helvetica";
 
     $self->{todo} = [];
     $self->{bookmarks} = [];
@@ -123,7 +125,7 @@ sub new_page {
 
     if (my $logo = $self->{logo}) {
         my $logo_w = $logo->{image}->width * $logo->{scale};
-        $self->{pdf}->add_image(img => $logo->{image}, x => 612 - $logo_w, y => 0, scale => $logo->{scale});
+        $self->{pdf}->add_image(img => $logo->{image}, x => 612 - $logo_w - $logo->{x}, y => $logo->{y}, scale => $logo->{scale});
     }
 
     $self->{pdf}->set_font(face => $self->{headline_font}, size => $self->{headline_size});
@@ -204,6 +206,14 @@ sub start_element {
         if (exists($el->{Attributes}{"{}scale"})) {
             $self->{logo}{scale} = $el->{Attributes}{"{}scale"}{Value};
         }
+        if (exists($el->{Attributes}{"{}x"})) {
+            $self->{logo}{x} = $el->{Attributes}{"{}x"}{Value};
+        }
+        if (exists($el->{Attributes}{"{}y"})) {
+            $self->{logo}{y} = $el->{Attributes}{"{}y"}{Value};
+        }
+	$self->{logo}{x} ||= 0;
+	$self->{logo}{y} ||= 0;
         $self->{logo}{scale} ||= 1.0;
         $self->gathered_text; # reset
     }
@@ -229,16 +239,11 @@ sub start_element {
         $self->{cache_until} = $el->{Name};
         $self->{cache} = [["slide_start_element", $el]];
     }
-    elsif ($name eq 'point') {
-    }
-    elsif ($name eq 'source_code' || $name eq 'source-code') {
-    }
     elsif ($name eq 'image') {
         $self->gathered_text;
     }
-    elsif ($name eq 'i' || $name eq 'b') {
-    }
-    elsif ($name eq 'colour' || $name eq 'color') {
+    elsif ($name =~ /(point|source[_-]code|i|b|colou?r|table|row|col|rect|circle|ellipse|polyline|line|path|text)/) {
+      # passthrough to allow these types
     }
     else {
         warn("Unknown tag: $name");
@@ -426,10 +431,10 @@ sub image {
             $pdf->get_value("imagewidth", $file_handle->img),
             $pdf->get_value("imageheight", $file_handle->img)
             );
-    
+
     $imgw *= $scale;
     $imgh *= $scale;
-    
+
     $pdf->add_image(img => $file_handle,
             x => (612 / 2) - ($imgw / 2),
             y => ($y - $imgh),
@@ -473,7 +478,7 @@ sub bullet {
 
     $pdf->set_font(face => "ZapfDingbats", size => $size - 4, encoding => "builtin");
     $pdf->print($char);
-    $pdf->set_font(face => "Helvetica", size => $size);
+    $pdf->set_font(face => $self->{normal_font}, size => $size);
     $pdf->print("   ");
     return $size;
 }
@@ -508,6 +513,186 @@ my %colours = (
     aqua => "00FFFF",
 );
 
+sub get_colour {
+    my $colour = shift;
+    if ($colour !~ s/^#//) {
+        $colour = $colours{$colour} || die "Unknown colour: $colour";
+    }
+    if ($colour !~ /^[0-9a-fA-F]{6}$/) {
+        die "Invalid colour format: #$colour";
+    }
+    my ($r, $g, $b) = map { hex()/255 } ($colour =~ /(..)/g);
+    return [$r, $g, $b];
+}
+
+sub process_css_styles {
+    my ($self, $style, $text_mode) = @_;
+
+    if ($text_mode) {
+        $self->{stroke} = 0;
+        $self->{fill} = 1;
+    }
+    else {
+        $self->{stroke} = 1;
+        $self->{fill} = 0;
+    }
+
+    return unless $style;
+
+    my $prev_font = $self->{pdf}->get_parameter("fontname");
+    my $new_font = $prev_font;
+    my $bold = 0;
+    my $italic = 0;
+    my $size = $self->{pdf}->get_value('fontsize');
+    if ($new_font =~ s/-(.*)$//) {
+        my $removed = $1;
+        if ($removed =~ /Bold/i) {
+            $bold = 1;
+        }
+        if ($removed =~ /(Oblique|Italic)/i) {
+            $italic = 1;
+        }
+    }
+    foreach my $part (split(/;\s*/s, $style)) {
+        my ($key, $value) = split(/\s*:\s*/, $part, 2);
+        # Keys we need to implement:
+        # color, fill, font, font-style, font-weight, font-size,
+        # font-family, stroke, stroke-linecap, stroke-linejoin, stroke-width,
+
+        # warn("got $key = $value\n");
+        if ($key eq 'font') {
+            # [ [ <'font-style'> || <'font-variant'> || <'font-weight'> ]? <'font-size'> [ / <'line-height'> ]? <'font-family'> ]
+            if ($value =~ /^((\S+)\s+)?((\S+)\s+)(\S+)$/) {
+                my ($attribs, $ptsize, $name) = ($2, $4, $5);
+                $attribs ||= 'inherit';
+                if ($attribs eq 'normal') {
+                    $bold = 0; $italic = 0;
+                }
+                elsif ($attribs eq 'inherit') {
+                    # Do nothing
+                }
+                elsif ($attribs eq 'bold' || $attribs eq 'bolder') {
+                    $bold = 1;
+                }
+                elsif ($attribs eq 'italic' || $attribs eq 'oblique') {
+                    $italic = 1;
+                }
+
+                if ($ptsize !~ s/pt$//) {
+                    die "Cannot support fonts in anything but point sizes yet: $value";
+                }
+                $size = $ptsize;
+
+                $name =~ s/sans-serif/Helvetica/;
+                $name =~ s/serif/Times/;
+                $name =~ s/monospace/Courier/;
+                $new_font = $name;
+            }
+            else {
+                die "Failed to parse CSS font attribute: $value";
+            }
+        }
+        elsif ($key eq 'font-family') {
+            $value =~ s/serif/Times/;
+            $value =~ s/sans-serif/Helvetica/;
+            $value =~ s/monospace/Courier/;
+            $new_font = $value;
+        }
+        elsif ($key eq 'font-style') {
+            if ($value eq 'normal') {
+                $italic = 0;
+            }
+            elsif ($value eq 'italic') {
+                $italic = 1;
+            }
+        }
+        elsif ($key eq 'font-weight') {
+            if ($value eq 'normal') {
+                $bold = 0;
+            }
+            elsif ($value eq 'bold') {
+                $bold = 1;
+            }
+        }
+        elsif ($key eq 'font-size') {
+            if ($value !~ s/pt$//) {
+                die "Can't do anything but font-size in pt yet";
+            }
+            $size = $value;
+        }
+        elsif ($key eq 'color') {
+            # set both the stroke and fill color
+            $self->{pdf}->set_colour(rgb => get_colour($value), type => "both");
+        }
+        elsif ($key eq 'fill') {
+            if ($value eq 'none') {
+                $self->{fill} = 0;
+            }
+            else {
+                # it's a color
+                $self->{fill} = 1;
+                $self->{pdf}->set_colour(rgb => get_colour($value), type => "fill");
+            }
+        }
+        elsif ($key eq 'fill-rule') {
+            $value = 'winding' if $value eq 'nonzero';
+            $self->{pdf}->set_parameter(fillrule => $value);
+        }
+        elsif ($key eq 'stroke') {
+            if ($value eq 'none') {
+                $self->{stroke} = 0;
+            }
+            else {
+                # it's a color
+                $self->{stroke} = 1;
+                $self->{pdf}->set_colour(rgb => get_colour($value), type => "stroke");
+            }
+        }
+        elsif ($key eq 'stroke-linecap') {
+            $self->{pdf}->set_line_cap("${value}_end"); # PDFLib takes care of butt|round|square
+        }
+        elsif ($key eq 'stroke-linejoin') {
+            $self->{pdf}->set_line_join($value); # PDFLib takes care of miter|round|bevel
+        }
+        elsif ($key eq 'stroke-width') {
+            $self->{pdf}->set_line_width($value);
+        }
+        elsif ($key eq 'stroke-miterlimit') {
+            $self->{pdf}->set_miter_limit($value);
+        }
+    }
+
+    return unless $text_mode;
+
+    push @{$self->{font_stack}}, $prev_font;
+
+    my $ok = 0;
+#    warn(sprintf("set_font(%s => %s, %s => %s, %s => %s, %s => %s)\n",
+#                    face => $new_font,
+#                    italic => $italic,
+#                    bold => $bold,
+#                    size => $size,
+#                    )
+#    );
+    foreach my $face (split(/\s*/, $new_font)) {
+        eval {
+            $self->{pdf}->set_font(
+                    face => $new_font,
+                    italic => $italic,
+                    bold => $bold,
+                    size => $size,
+                    );
+        };
+        if (!$@) {
+            $ok = 1;
+            last;
+        }
+    }
+    if (!$ok) {
+        die "Unable to find font: $new_font : $@";
+    }
+}
+
 sub slide_start_element {
     my ($self, $el) = @_;
 
@@ -516,7 +701,7 @@ sub slide_start_element {
     my $name = $el->{LocalName};
 
     # transitions...
-    if ($name eq 'point' || $name eq 'image' || $name eq 'source_code' || $name eq 'source-code') {
+    if ($name =~ /(point|image|source[_-]code|col|row|circle|ellipse|rect|text|line)/) {
         if (exists($el->{Attributes}{"{}transition"})) {
             # has a transition
             my $trans = delete $el->{Attributes}{"{}transition"};
@@ -539,7 +724,7 @@ sub slide_start_element {
         $self->{colour_stack} = [[0,0,0]];
         # if we do bullet/image transitions, make sure new pages don't use a transition
         $el->{Attributes}{"{}transition"}{Value} = "replace";
-        # $self->{pdf}->set_text_pos(60, 500);
+        $self->{extents} = [{ x => 0, w => 612 }];
     }
     elsif ($name eq 'title') {
         $self->gathered_text; # reset
@@ -554,8 +739,45 @@ sub slide_start_element {
                     size => $self->{title_size},
                 );
     }
+    elsif ($name eq 'table') {
+        # push extents.
+        $self->{extents} = [{ %{$self->{extents}[0]} }, @{$self->{extents}}];
+        $self->{col_widths} = [];
+        my ($x, $y) = $self->{pdf}->get_text_pos;
+        $self->{max_height} = $y;
+        $self->{row_number} = 0;
+    }
+    elsif ($name eq 'row') {
+        $self->{col_number} = 0;
+        $self->{row_start} = [];
+        @{$self->{row_start}} = $self->{pdf}->get_text_pos;
+    }
+    elsif ($name eq 'col') {
+        my $width;
+        my $prev_x = $self->{extents}[1]{x};
+        if ($self->{row_number} > 0) {
+            $width = $self->{col_widths}[$self->{col_number}];
+        }
+        else {
+            $width = $el->{Attributes}{"{}width"}{Value};
+            $width =~ s/%$// || die "Column widths must be in percentages";
+            # warn("calculating ${width}% of $self->{extents}[1]{w}\n");
+            $width = $self->{extents}[1]{w} * ($width/100);
+            $self->{col_widths}[$self->{col_number}] = $width;
+        }
+        if ($self->{col_number} > 0) {
+            my $up_to = $self->{col_number} - 1;
+            foreach my $col (0 .. $up_to) {
+                $prev_x += $self->{col_widths}[$col];
+            }
+        }
+        # warn("col setting extents to x => $prev_x, w => $width\n");
+        $self->{extents}[0]{x} = $prev_x;
+        $self->{extents}[0]{w} = $width;
+        $self->{pdf}->set_text_pos(@{$self->{row_start}});
+    }
     elsif ($name eq 'i') {
-        my $prev = $self->{pdf}->get_parameter("fontname");
+        my $prev = $self->{pdf}->get_parameter("fontname") || $self->{normal_font};
         my $new = $prev;
         my $bold = 0;
         if ($new =~ s/-(.*)$//) {
@@ -597,14 +819,17 @@ sub slide_start_element {
         }
 
         if ($level == 1) {
-            $self->{pdf}->set_text_pos(80, $y);
+            $self->{pdf}->set_text_pos($self->{extents}[0]{x} + 80, $y);
         }
 
         my $size = $self->bullet($level);
 
         ($x, $y) = $self->{pdf}->get_text_pos;
+        # warn(sprintf("creating new bb: %s => %d, %s => %d, %s => %d, %s => %d",
+        #     x => $x, y => $y, w => ($self->{extents}[0]{w} - ($x - $self->{extents}[0]{x})), h => (450 - $y)
+        #     ));
         my $bb = $self->{pdf}->new_bounding_box(
-            x => $x, y => $y, w => (612 - $x), h => (450 - $y)
+            x => $x, y => $y, w => ($self->{extents}[0]{w} - ($x - $self->{extents}[0]{x})), h => (450 - $y)
         );
         $self->{bb} = $bb;
     }
@@ -619,7 +844,7 @@ sub slide_start_element {
         $self->{pdf}->set_font(face => "Courier", size => $size);
         my ($x, $y) = $self->{pdf}->get_text_pos;
         my $bb = $self->{pdf}->new_bounding_box(
-            x => $x, y => $y, w => (612 - $x), h => (450 - $y),
+            x => $x, y => $y, w => ($self->{extents}[0]{w} - ($x - $self->{extents}[0]{x})), h => (450 - $y),
             wrap => 0,
         );
         $self->{bb} = $bb;
@@ -646,6 +871,113 @@ sub slide_start_element {
 
         push @{$self->{colour_stack}}, [$r,$g,$b];
         $self->{bb}->set_color(rgb => [$r,$g,$b]);
+    }
+    elsif ($name eq 'rect') {
+        my ($x, $y, $width, $height) = (
+            $el->{Attributes}{"{}x"}{Value},
+            $el->{Attributes}{"{}y"}{Value},
+            $el->{Attributes}{"{}width"}{Value},
+            $el->{Attributes}{"{}height"}{Value},
+            );
+        $self->{pdf}->save_graphics_state();
+        $self->process_css_styles($el->{Attributes}{"{}style"}{Value});
+        $self->{pdf}->rect(x => $x, y => $y, w => $width, h => $height);
+        if ($self->{fill} && $self->{stroke}) {
+            $self->{pdf}->fill_stroke;
+        }
+        elsif ($self->{fill}) {
+            $self->{pdf}->fill;
+        }
+        elsif ($self->{stroke}) {
+            $self->{pdf}->stroke;
+        }
+    }
+    elsif ($name eq 'circle') {
+        my ($cx, $cy, $r) = (
+            $el->{Attributes}{"{}cx"}{Value},
+            $el->{Attributes}{"{}cy"}{Value},
+            $el->{Attributes}{"{}r"}{Value},
+            );
+        $self->{pdf}->save_graphics_state();
+        $self->process_css_styles($el->{Attributes}{"{}style"}{Value});
+        $self->{pdf}->circle(x => $cx, y => $cy, r => $r);
+        if ($self->{fill} && $self->{stroke}) {
+            $self->{pdf}->fill_stroke;
+        }
+        elsif ($self->{fill}) {
+            $self->{pdf}->fill;
+        }
+        elsif ($self->{stroke}) {
+            $self->{pdf}->stroke;
+        }
+    }
+    elsif ($name eq 'ellipse') {
+        my ($cx, $cy, $rx, $ry) = (
+            $el->{Attributes}{"{}cx"}{Value},
+            $el->{Attributes}{"{}cy"}{Value},
+            $el->{Attributes}{"{}rx"}{Value},
+            $el->{Attributes}{"{}ry"}{Value},
+            );
+        my $r = $rx;
+        my $scale = $ry / $r;
+        $self->{pdf}->save_graphics_state();
+        $self->process_css_styles($el->{Attributes}{"{}style"}{Value});
+        $self->{pdf}->coord_scale(1, $scale);
+        $self->{pdf}->circle(x => $cx, y => $cy, r => $r);
+        if ($self->{fill} && $self->{stroke}) {
+            $self->{pdf}->fill_stroke;
+        }
+        elsif ($self->{fill}) {
+            $self->{pdf}->fill;
+        }
+        elsif ($self->{stroke}) {
+            $self->{pdf}->stroke;
+        }
+    }
+    elsif ($name eq 'line') {
+        my ($x1, $y1, $x2, $y2) = (
+            $el->{Attributes}{"{}x1"}{Value},
+            $el->{Attributes}{"{}y1"}{Value},
+            $el->{Attributes}{"{}x2"}{Value},
+            $el->{Attributes}{"{}y2"}{Value},
+            );
+        $self->{pdf}->save_graphics_state();
+        $self->process_css_styles($el->{Attributes}{"{}style"}{Value});
+        $self->{pdf}->move_to($x1, $y1);
+        $self->{pdf}->line_to($x2, $y2);
+        if ($self->{fill} && $self->{stroke}) {
+            $self->{pdf}->fill_stroke;
+        }
+        elsif ($self->{fill}) {
+            $self->{pdf}->fill;
+        }
+        elsif ($self->{stroke}) {
+            $self->{pdf}->stroke;
+        }
+    }
+    elsif ($name eq 'text') {
+        my ($x, $y) = (
+            $el->{Attributes}{"{}x"}{Value},
+            $el->{Attributes}{"{}y"}{Value},
+        );
+        $self->{pdf}->save_graphics_state();
+        $self->{pdf}->set_font( face => $self->{normal_font}, size => 14.0 );
+        $self->process_css_styles($el->{Attributes}{"{}style"}{Value}, 1);
+        $self->{pdf}->set_text_pos($x, $y);
+        $self->{chars_ok} = 1;
+        $self->gathered_text; # reset
+        if ($self->{fill} && $self->{stroke}) {
+            $self->{pdf}->set_value(textrendering => 2);
+        }
+        elsif ($self->{fill}) {
+            $self->{pdf}->set_value(textrendering => 0);
+        }
+        elsif ($self->{stroke}) {
+            $self->{pdf}->set_value(textrendering => 1);
+        }
+        else {
+            $self->{pdf}->set_value(textrendering => 3); # invisible
+        }
     }
 }
 
@@ -682,7 +1014,7 @@ sub slide_end_element {
         my ($x, $y) = $self->{pdf}->get_text_pos();
         $self->{pdf}->add_link(
             link => $el->{Attributes}{"{}href"}{Value},
-            x => 20, y => $y - 5,
+            x => 20, y => $y + $self->{pdf}->get_value('leading'),
             w => 570, h => 24) if exists($el->{Attributes}{"{}href"});
 
         $self->{pdf}->set_text_pos(60, $y);
@@ -697,6 +1029,11 @@ sub slide_end_element {
     }
     elsif ($name eq 'point') {
         $self->{chars_ok} = 0;
+        my ($x, $y) = $self->{pdf}->get_text_pos();
+        $self->{pdf}->add_link(
+            link => $el->{Attributes}{"{}href"}{Value},
+            x => 20, y => $y + $self->{pdf}->get_value('leading'),
+            w => 570, h => 24) if exists($el->{Attributes}{"{}href"});
     }
     elsif ($name eq 'source_code' || $name eq 'source-code') {
         $self->{chars_ok} = 0;
@@ -707,6 +1044,31 @@ sub slide_end_element {
     elsif ($name eq 'colour' || $name eq 'color') {
         pop @{$self->{colour_stack}};
         $self->{bb}->set_colour( rgb => $self->{colour_stack}[-1] );
+    }
+    elsif ($name eq 'table') {
+        shift @{$self->{extents}};
+    }
+    elsif ($name eq 'row') {
+        $self->{row_number}++;
+        $self->{pdf}->set_text_pos($self->{row_start}[0], $self->{max_height});
+    }
+    elsif ($name eq 'col') {
+        $self->{col_number}++;
+        $self->{pdf}->print_line("");
+        my ($x, $y) = $self->{pdf}->get_text_pos;
+        $self->{max_height} = $y if $y > $self->{max_height};
+    }
+    elsif ($name eq 'text') {
+        my $text = $self->gathered_text;
+        $self->{chars_ok} = 0;
+        $self->{pdf}->print($text);
+        $self->{pdf}->restore_graphics_state();
+        my $font = pop @{$self->{font_stack}};
+        # warn("resting font to: $font\n");
+        $self->{pdf}->set_font(face => $font);
+    }
+    elsif ($name =~ /^(circle|ellipse|line|rect)$/) {
+        $self->{pdf}->restore_graphics_state();
     }
 }
 
@@ -719,7 +1081,7 @@ sub slide_characters {
 
     my $name = $self->{SlideCurrent}->{LocalName};
     my $text = $chars->{Data};
-    return unless $text;
+    return unless $text && $self->{bb};
     my $leftover = $self->{bb}->print($text);
     if ($leftover) {
         die "Could not print: $leftover\n";
@@ -752,7 +1114,7 @@ Or using directly:
           Output => "presentation.pdf"
           )
       );
-  
+
   $parser->parse_uri("presentation.axp");
 
 =head1 DESCRIPTION
@@ -764,19 +1126,25 @@ rivalling PowerPoint, and almost certainly better than most other
 freeware presentation tools on Unix/Linux.
 
 The presentations support slide transitions, PDF bookmarks, bullet
-points, source code (fixed font) sections, images, colours, bold and
-italics, hyperlinks, and transition effects for all the bullet
-points, source, and image sections.
+points, source code (fixed font) sections, images, SVG vector graphics,
+tables, colours, bold and italics, hyperlinks, and transition effects
+for all the bullet points, source, and image sections.
 
-Rather than describing the format in detail, it is far easier to
-examine (and copy) the example in the testfiles directory in the
-distribution. We have included that verbatim here in case you lost it
-during the install:
+=head1 SYNTAX
 
- <?xml version="1.0"?>
- <slideshow>
- 
-  <title>AxKit</title>
+=head2 <slideshow>
+
+This is the outer element, and must always be present.
+
+=head2 <title>
+
+  <slideshow>
+    <title>My First Presentation</title>
+
+The title of the slideshow, used on the first (title) slide.
+
+=head2 <metadata>
+
   <metadata>
      <speaker>Matt Sergeant</speaker>
      <email>matt@axkit.com</email>
@@ -785,99 +1153,177 @@ during the install:
      <logo scale="0.4">ax_logo.png</logo>
      <background>redbg.png</background>
   </metadata>
-  
+
+Metadata for the slideshow. Speaker and Organisation are used on the
+first (title) slide, and the email and link are turned into hyperlinks.
+
+The background and logo are used on every slide.
+
+=head2 <slideset>
+
+  <slideset>
+    <title>A subset of the show</title>
+    <subtitle>And a subtitle for it</subtitle>
+
+A slideset groups slides into relevant subsets, with a title and a new
+level in the bookmarks for the PDF.
+
+The title and subtitle tags can have C<href> attributes which turn those
+texts into links.
+
+=head2 <slide>
+
   <slide transition="dissolve">
     <title>Introduction</title>
-    <point level="1">Perl's XML Capabilities</point>
-    <point level="1">AxKit intro</point>
-    <point level="1">AxKit static sites</point>
-    <point level="1">AxKit dynamic sites (XSP)</point>
-    <point level="1">Advanced <colour name="red">AxKit</colour></point>
-    <source_code>
- Foo!
-    </source_code>
+    <point>Perl's XML Capabilities</point>
+    <source-code>use XML::SAX;</source-code>
   </slide>
-  
-  <slideset>
-     <title>XML with Perl Introduction</title>
-     
-     <slide>
-        <title>
-        A very long <i>title that</i> should show how 
-        word <i>wrapping in the title</i> tag hopefully works
-        properly today
-        </title>
-        <point level="1">SAX-like API</point>
-        <point level="1">register callback handler methods</point>
-        <point level="2">start tag</point>
-        <point level="2">end tag</point>
-        <point level="2">characters</point>
-        <point level="2">comments</point>
-        <point level="2">processing instructions</point>
-        <source_code>
- &lt;?pi here?>
-        </source_code>
-        <point level="2">... and more</point>
-        <point level="1">Non validating XML parser</point>
-        <point level="1">dies (throws an exception) on bad XML</point>
-     </slide>
-     
-     <slide>
-        <title>XML::Parser code</title>
-        <source_code>
- my $p = XML::Parser->new(
- <i>    Handlers => { # should be in italics!
-        Start => \&amp;start_tag, 
-        End => \&amp;end_tag,
-        # add more handlers here
-        });
-    </i>
- $p->parsefile("foo.xml");
- 
- exit(0);
- 
- sub start_tag {
-  my ($expat, $tag, %attribs) = @_;
-  print "Start tag: $tag\n";
- }
- 
- sub end_tag {
-  my ($expat, $tag) = @_;
-  print "End tag: $tag\n";
- }
-        </source_code>
-     </slide>
-     
-     <slide>
-     <title>XML::XPath Implementation</title>
-     <point level="1">XML::Parser and SAX parsers build an in-memory tree</point>
-     <point level="1">Hand-built parser for XPath syntax (rather than YACC based parser)</point>
-     <point level="1">Garbage Collection yet still has circular references (and works on Perl 5.005)</point>
-     <image>pointers.png</image>
-     </slide>
-     
-  </slideset>
-  
+
+The slide tag defines a single slide. Each top level tag in the slide
+can have a C<transition> attribute, which either defines a transition
+for the entire slide, or for the individual top level items.
+
+The valid settings for transition are:
+
+=over 4
+
+=item replace
+
+The default. Just replace the old page. Use this on top level page items
+to make them appear one by one.
+
+=item split
+
+Two lines sweeping across the screen reveal the page
+
+=item blinds
+
+Multiple lines sweep across the screen to reveal the page
+
+=item box
+
+A box reveals the page
+
+=item wipe
+
+A single line sweaping across the screen reveals the page
+
+=item dissolve
+
+The old page dissolves to reveal the new page
+
+=item glitter
+
+The dissolve effect moves from one screen edge to another
+
+=back
+
+For example, to have each point on a slide reveal themselves
+one by one:
+
   <slide>
-  <title>Conclusions</title>
-  <point level="1" transition="dissolve">Perl and XML are a powerful combination</point>
-  <point level="1" transition="replace">XPath and XSLT add to the mix...</point>
-  <point level="1" transition="glitter">AxKit can reduce your long term costs</point>
-  <point level="2" transition="dissolve">In site re-design</point>
-  <point level="2" transition="box">and in content re-purposing</point>
-  <point level="1" transition="wipe">Open Source equal to commercial alternatives</point>
-  <image transition="dissolve">world_map-960.png</image>
+    <title>Transitioning Bullet Points</title>
+    <point transition="replace">Point 1</point>
+    <point transition="replace">Point 2</point>
+    <point transition="replace">Final Point</point>
   </slide>
-  
-  <slide>
-  <title>Resources and contact</title>
-  <point level="1">AxKit: http://axkit.org/</point>
-  <point level="1">CPAN: http://search.cpan.org</point>
-  <point level="1">libxml and libxslt: http://www.xmlsoft.org</point>
-  <point level="1">Sablotron: http://www.gingerall.com</point>
-  <point level="1">XPath and XSLT Tutorials: http://zvon.org</point>
-  </slide>
-  
- </slideshow>
+
+=head2 <point>
+
+The point specifies a bullet point to place on your slide.
+
+The point may have a C<href> attribute, a C<transition> attribute,
+and a C<level> attribute. The C<level> attribute defaults to 1, for
+a top level bullet point, and can go down as far as you please.
+
+=head2 <source-code> or <source_code>
+
+The source-code tag identifies a piece of verbatim text in a fixed
+font - originally designed for source code.
+
+=head2 <image>
+
+The image tag allows you to place an image on the slide. It places the
+image at the current position, centered. The C<scale> attribute may be
+used to shrink or grow the image to fit.
+
+=head2 <colour> or <color>
+
+The colour tag specifies a colour for the text to be output. To define
+the colour, either use the C<name> attribute, using one of the 16 HTML
+named colours, or use the C<rgb> attribute and use a hex triplet
+like you can in HTML.
+
+=head2 <i> and <b>
+
+Use these tags for italics and bold within text.
+
+=head2 <table>
+
+  <table>
+    <row>
+      <col width="40%">
+      ...
+      </col>
+      <col width="60%">
+      ...
+      </col>
+    </row>
+  </table>
+
+AxPoint has some rudimentary table support, as you can see above. This
+is fairly experimental, and does not do any reflowing like HTML - it
+only supports fixed column widths and only as percentages. Using a table
+allows you to layout a slide in two columns, and also have multi-row
+descriptions of source code with bullet points.
+
+=head1 SVG Support
+
+AxPoint has some SVG support so you can do vector graphics on your slides.
+
+All SVG items allow the C<transition> attribute as defined above.
+
+=head2 <rect>
+
+  <rect x="100" y="100" width="300" height="200"
+    style="stroke: blue; stroke-width=5; fill: red"/>
+
+As you can see, AxPoint's SVG support uses CSS to define the style. The
+above draws a rectangle with a thick blue line around it, and filled
+in red.
+
+=head2 <circle>
+
+  <circle cx="50" cy="100" r="50" style="stroke: black"/>
+
+=head2 <ellipse>
+
+  <ellipse cx="100" cy="50" rx="30" ry="60" style="fill: aqua;"/>
+
+=head2 <line>
+
+  <line x1="50" y1="50" x2="200" y2="200" style="stroke: black;"/>
+
+=head2 <text>
+
+  <text x="200" y="200"
+    style="stroke: black; fill: none; font: italic 24pt serif"
+  >Some Floating Text</text>
+
+This tag allows you to float text anywhere on the screen.
+
+=head1 BUGS
+
+Please use http://rt.cpan.org/ for reporting bugs.
+
+=head1 AUTHOR
+
+Matt Sergeant, matt@sergeant.org
+
+Copyright 2002.
+
+=head1 LICENSE
+
+This is free software, distributed under the same terms as Perl itself.
 
 =cut

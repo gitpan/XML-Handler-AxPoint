@@ -1,4 +1,12 @@
 
+1.2
+    - Added table support
+    - Added SVG vector graphics support
+    - A number of other fixes
+
+1.02
+    - Added ability to position logos (Lari Hotari)
+
 1.01
     - Bump rev to 1.0+ to reflect stability
 
