@@ -1,0 +1,103 @@
+<?xml version="1.0"?>
+<slideshow>
+
+  <title>AxKit</title>
+  <metadata>
+     <speaker>Matt Sergeant</speaker>
+     <email>matt@axkit.com</email>
+     <organisation>AxKit.com Ltd</organisation>
+     <link>http://axkit.com/</link>
+     <logo scale="0.4">ax_logo.png</logo>
+     <background>redbg.png</background>
+  </metadata>
+  
+  <slide transition="dissolve">
+    <title>Introduction</title>
+    <point level="1">Perl's XML Capabilities</point>
+    <point level="1">AxKit intro</point>
+    <point level="1">AxKit static sites</point>
+    <point level="1">AxKit dynamic sites (XSP)</point>
+    <point level="1">Advanced <colour name="red">AxKit</colour></point>
+    <source_code>
+Foo!
+    </source_code>
+  </slide>
+  
+  <slideset>
+     <title>XML with Perl Introduction</title>
+     
+     <slide>
+        <title>A very long <i>title that</i> should show how word <i>wrapping in the title</i> tag hopefully works properly today</title>
+        <point level="1">SAX-like API</point>
+        <point level="1">register callback handler methods</point>
+        <point level="2">start tag</point>
+        <point level="2">end tag</point>
+        <point level="2">characters</point>
+        <point level="2">comments</point>
+        <point level="2">processing instructions</point>
+        <source_code>
+&lt;?pi here?>
+        </source_code>
+        <point level="2">... and more</point>
+        <point level="1">Non validating XML parser</point>
+        <point level="1">dies (throws an exception) on bad XML</point>
+     </slide>
+     
+     <slide>
+        <title>XML::Parser code</title>
+        <source_code>
+my $p = XML::Parser->new(
+<i>    Handlers => { 
+        Start => \&amp;start_tag, 
+        End => \&amp;end_tag,
+        # add more handlers here
+        });
+    </i>
+$p->parsefile("foo.xml");
+
+exit(0);
+
+sub start_tag {
+  my ($expat, $tag, %attribs) = @_;
+  print "Start tag: $tag\n";
+}
+
+sub end_tag {
+  my ($expat, $tag) = @_;
+  print "End tag: $tag\n";
+}
+        </source_code>
+     </slide>
+     
+     <slide>
+     <title>XML::XPath Implementation</title>
+     <point level="1">XML::Parser and SAX parsers build an in-memory tree</point>
+     <point level="1">Hand-built parser for XPath syntax (rather than YACC based parser)</point>
+     <point level="1">Garbage Collection yet still has circular references (and works on Perl 5.005)</point>
+     <image>pointers.png</image>
+     </slide>
+     
+  </slideset>
+  
+  <slide>
+  <title>Conclusions</title>
+  <point level="1" transition="dissolve">Perl and XML are a powerful combination</point>
+  <point level="1" transition="replace">XPath and XSLT add to the mix...</point>
+  <point level="1" transition="glitter">AxKit can reduce your long term costs</point>
+  <point level="2" transition="dissolve">In site re-design</point>
+  <point level="2" transition="box">and in content re-purposing</point>
+  <point level="1" transition="wipe">Open Source equal to commercial alternatives</point>
+  <image transition="dissolve">world_map-960.png</image>
+  </slide>
+  
+  <slide>
+  <title>Resources and contact</title>
+  <point level="1">AxKit: http://axkit.org/</point>
+  <point level="1">CPAN: http://search.cpan.org</point>
+  <point level="1">libxml and libxslt: http://www.xmlsoft.org</point>
+  <point level="1">Sablotron: http://www.gingerall.com</point>
+  <point level="1">XPath and XSLT Tutorials: http://zvon.org</point>
+  </slide>
+  
+</slideshow>
+
