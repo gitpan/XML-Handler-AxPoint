@@ -1,15 +1,16 @@
 #!/usr/bin/perl -w
-# $Id: axpoint,v 1.2 2002/03/20 20:17:35 matt Exp $
+# $Id: axpoint,v 1.6 2002/06/11 07:35:41 matt Exp $
 
 use strict;
 use XML::Handler::AxPoint;
 use XML::SAX;
 use Getopt::Std;
 use FindBin qw($Script);
-use vars qw($opt_p $opt_h);
-getopts('ph');
+use vars qw($opt_p $opt_h $opt_l $opt_v);
+getopts('phlv');
 
 usage() if $opt_h;
+version() if $opt_v;
 
 my $source = shift(@ARGV) || usage();
 my $output = shift (@ARGV) || \*STDOUT;
@@ -21,13 +22,37 @@ XML::SAX::ParserFactory->parser(
     )
   )->parse_uri($source);
 
+if ($opt_l && $output) {
+    exec("acroread", $output);
+}
+
+exit(0);
+
 sub usage {
     print <<EOT;
-Usage: $Script [-p] source [output]
+Usage: $Script [OPTIONS] source [output]
 
   source    = source XML file containing presentation
   output    = output PDF file (defaults to STDOUT)
+ 
+OPTIONS are:
   -p        = print mode - no sub-slide transitions
+  -l        = launch acroread on new slideshow (requires output filename)
+  -h        = this screen
+  -v        = show version and copyright information
 EOT
     exit(1);
 }
+
+sub version {
+	print <<EOT;
+This is AxPoint version $XML::Handler::AxPoint::VERSION.
+
+AxPoint is copyright axkit.com Ltd, 2002. This is free software
+distributed under either the Perl Artistic License, or the GPL
+version 2.
+
+EOT
+	exit(1);
+}
+

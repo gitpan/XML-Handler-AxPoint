@@ -133,6 +133,26 @@ sub end_tag {
   <point level="1">Sablotron: http://www.gingerall.com</point>
   <point level="1">XPath and XSLT Tutorials: http://zvon.org</point>
   </slide>
+
+  <slide>
+  	<title>SVG stuff</title>
+	<path style="stroke: black; stroke-width: 3;" d="M125,75 A100,50, 30 0,0 225,125"/>
+	<path style="stroke: red; stroke-width: 3;"   d="M125,75 A100,50, 30 1,0 225,125"/>
+	<path style="stroke: blue; stroke-width: 3;"  d="M125,75 A100,50, 0 0,1 225,125"/>
+	<path style="stroke: green; stroke-width: 3;" d="M125,75 A100,50, 0 1,1 225,125"/>
+
+    <path d="M300,200 h-150 a150,150 0 1,0 150,-150 z"
+        style="fill: red; stroke: blue; stroke-width: 5" />
+    <path d="M275,175 v-150 a150,150 0 0,0 -150,150 z"
+        style="fill: yellow; stroke: blue; stroke-width: 5" />
+    
+    <path d="M200,350 l 50,-25 
+           a25,25 -30 0,1 50,-25 l 50,-25 
+           a25,50 -30 0,1 50,-25 l 50,-25 
+           a25,75 -30 0,1 50,-25 l 50,-25 
+           a25,100 -30 0,1 50,-25 l 50,-25"
+        fill="none" stroke="red" stroke-width="5"  />
+  </slide>
   
 </slideshow>
 

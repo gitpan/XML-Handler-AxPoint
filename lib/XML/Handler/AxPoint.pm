@@ -1,4 +1,4 @@
-# $Id: AxPoint.pm,v 1.26 2002/03/21 14:45:49 matt Exp $
+# $Id: AxPoint.pm,v 1.33 2002/06/11 07:39:24 matt Exp $
 
 package XML::Handler::AxPoint;
 use strict;
@@ -9,7 +9,7 @@ use File::Basename;
 use PDFLib 0.11;
 
 use vars qw($VERSION);
-$VERSION = '1.21';
+$VERSION = '1.30';
 
 sub new {
     my $class = shift;
@@ -70,6 +70,8 @@ sub start_document {
 
     $self->{todo} = [];
     $self->{bookmarks} = [];
+
+    $self->{default_transition} = [];
 }
 
 sub run_todo {
@@ -192,6 +194,9 @@ sub start_element {
 
     if ($name eq 'slideshow') {
         $self->push_todo(sub { $self->new_page });
+        if (exists($el->{Attributes}{"{}default-transition"})) {
+            unshift @{$self->{default_transition}}, $el->{Attributes}{"{}default-transition"}{Value};
+        }
     }
     elsif ($name eq 'title') {
         $self->gathered_text; # reset
@@ -220,8 +225,8 @@ sub start_element {
         if (exists($el->{Attributes}{"{}y"})) {
             $self->{logo}{y} = $el->{Attributes}{"{}y"}{Value};
         }
-	$self->{logo}{x} ||= 0;
-	$self->{logo}{y} ||= 0;
+    $self->{logo}{x} ||= 0;
+    $self->{logo}{y} ||= 0;
         $self->{logo}{scale} ||= 1.0;
         $self->gathered_text; # reset
     }
@@ -234,6 +239,9 @@ sub start_element {
     }
     elsif ($name eq 'slideset') {
         $self->run_todo;
+        if (exists($el->{Attributes}{"{}default-transition"})) {
+            unshift @{$self->{default_transition}}, $el->{Attributes}{"{}default-transition"}{Value};
+        }
         $self->new_page;
     }
     elsif ($name eq 'subtitle') {
@@ -242,6 +250,9 @@ sub start_element {
         $self->run_todo; # might need to create slideset here.
         $self->{pdf}->end_page;
 
+        if (exists($el->{Attributes}{"{}default-transition"})) {
+            unshift @{$self->{default_transition}}, $el->{Attributes}{"{}default-transition"}{Value};
+        }
         $self->{images} = [];
         # cache these events now...
         $self->{cache_until} = $el->{Name};
@@ -251,10 +262,10 @@ sub start_element {
         $self->gathered_text;
         if (exists($el->{Attributes}{"{http://www.w3.org/1999/xlink}href"})) {
             # uses xlink, not characters
-            $self->characters($el->{Attributes}{"{http://www.w3.org/1999/xlink}href"}{Value});
+            $self->characters({ Data => $el->{Attributes}{"{http://www.w3.org/1999/xlink}href"}{Value}});
         }
     }
-    elsif ($name =~ /(point|source[_-]code|i|b|colou?r|table|row|col|rect|circle|ellipse|polyline|line|path|text)/) {
+    elsif ($name =~ /(point|source[_-]code|i|b|colou?r|table|row|col|rect|circle|ellipse|polyline|line|path|text|span)/) {
       # passthrough to allow these types
     }
     else {
@@ -265,21 +276,24 @@ sub start_element {
 sub end_element {
     my ($self, $el) = @_;
 
-    $el = $self->{Current};
-    my $parent = $self->{Current} = $el->{Parent};
-
     if ($self->{cache_until}) {
         push @{$self->{cache}}, ["slide_end_element", $el];
         if ($el->{Name} eq $self->{cache_until}) {
             delete $self->{cache_until};
-            return $self->playback_cache;
+            $self->playback_cache;
         }
     }
+
+    $el = $self->{Current};
+    my $parent = $self->{Current} = $el->{Parent};
 
     my $name = $el->{LocalName};
     # warn("end_ $name\n");
     if ($name eq 'slideshow') {
         $self->run_todo;
+        if (exists($el->{Attributes}{"{}default-transition"})) {
+            shift @{$self->{default_transition}};
+        }
         $self->pop_bookmark;
     }
     elsif ($name eq 'title') {
@@ -356,10 +370,10 @@ sub end_element {
         $self->{metadata}{link} = $self->gathered_text;
     }
     elsif ($name eq 'logo') {
-        my $logo_file = 
+        my $logo_file =
             File::Spec->rel2abs(
                 $self->gathered_text,
-                File::Basename::dirname($self->{locator}{SystemId})
+                File::Basename::dirname($self->{locator}{SystemId} || '')
             );
         my $type = get_filetype($logo_file);
         my $logo = $self->{pdf}->load_image(
@@ -376,7 +390,7 @@ sub end_element {
         my $bg_file =
             File::Spec->rel2abs(
                 $self->gathered_text,
-                File::Basename::dirname($self->{locator}{SystemId})
+                File::Basename::dirname($self->{locator}{SystemId} || '')
             );
         my $type = get_filetype($bg_file);
         my $bg = $self->{pdf}->load_image(
@@ -391,6 +405,9 @@ sub end_element {
     }
     elsif ($name eq 'slideset') {
         $self->pop_bookmark;
+        if (exists($el->{Attributes}{"{}default-transition"})) {
+            shift @{$self->{default_transition}};
+        }
     }
     elsif ($name eq 'subtitle') {
         if ($parent->{LocalName} eq 'slideset') {
@@ -406,12 +423,15 @@ sub end_element {
     }
     elsif ($name eq 'slide') {
         $self->run_todo;
+        if (exists($el->{Attributes}{"{}default-transition"})) {
+            shift @{$self->{default_transition}};
+        }
     }
     elsif ($name eq 'image') {
         my $image =
             File::Spec->rel2abs(
                 $self->gathered_text,
-                File::Basename::dirname($self->{locator}{SystemId})
+                File::Basename::dirname($self->{locator}{SystemId} || '')
             );
         my $image_ref = $self->{pdf}->load_image(
                 filename => $image,
@@ -423,8 +443,8 @@ sub end_element {
         my $y = $el->{Attributes}{"{}y"}{Value};
         my $width = $el->{Attributes}{"{}width"}{Value};
         my $height = $el->{Attributes}{"{}height"}{Value};
-        
-        push @{$self->{images}}, 
+
+        push @{$self->{images}},
             {
                 scale => $scale,
                 image_ref => $image_ref,
@@ -466,7 +486,7 @@ sub image {
     $pdf->print_line("");
 
     my ($x, $y) = $pdf->get_text_pos;
-    
+
     my ($imgw, $imgh) = (
             $pdf->get_value("imagewidth", $file_handle->img),
             $pdf->get_value("imageheight", $file_handle->img)
@@ -583,11 +603,13 @@ sub process_css_styles {
 
     return unless $style;
 
-    my $prev_font = $self->{pdf}->get_parameter("fontname");
+    my $pdf = $self->{bb} || $self->{pdf};
+
+    my $prev_font = $pdf->get_parameter("fontname");
     my $new_font = $prev_font;
     my $bold = 0;
     my $italic = 0;
-    my $size = $self->{pdf}->get_value('fontsize');
+    my $size = $pdf->get_value('fontsize');
     if ($new_font =~ s/-(.*)$//) {
         my $removed = $1;
         if ($removed =~ /Bold/i) {
@@ -637,8 +659,8 @@ sub process_css_styles {
             }
         }
         elsif ($key eq 'font-family') {
-            $value =~ s/serif/Times/;
             $value =~ s/sans-serif/Helvetica/;
+            $value =~ s/serif/Times/;
             $value =~ s/monospace/Courier/;
             $new_font = $value;
         }
@@ -666,7 +688,7 @@ sub process_css_styles {
         }
         elsif ($key eq 'color') {
             # set both the stroke and fill color
-            $self->{pdf}->set_colour(rgb => get_colour($value), type => "both");
+            $pdf->set_colour(rgb => get_colour($value), type => "both");
         }
         elsif ($key eq 'fill') {
             if ($value eq 'none') {
@@ -675,12 +697,12 @@ sub process_css_styles {
             else {
                 # it's a color
                 $self->{fill} = 1;
-                $self->{pdf}->set_colour(rgb => get_colour($value), type => "fill");
+                $pdf->set_colour(rgb => get_colour($value), type => "fill");
             }
         }
         elsif ($key eq 'fill-rule') {
             $value = 'winding' if $value eq 'nonzero';
-            $self->{pdf}->set_parameter(fillrule => $value);
+            $pdf->set_parameter(fillrule => $value);
         }
         elsif ($key eq 'stroke') {
             if ($value eq 'none') {
@@ -689,20 +711,20 @@ sub process_css_styles {
             else {
                 # it's a color
                 $self->{stroke} = 1;
-                $self->{pdf}->set_colour(rgb => get_colour($value), type => "stroke");
+                $pdf->set_colour(rgb => get_colour($value), type => "stroke");
             }
         }
         elsif ($key eq 'stroke-linecap') {
-            $self->{pdf}->set_line_cap("${value}_end"); # PDFLib takes care of butt|round|square
+            $pdf->set_line_cap("${value}_end"); # PDFLib takes care of butt|round|square
         }
         elsif ($key eq 'stroke-linejoin') {
-            $self->{pdf}->set_line_join($value); # PDFLib takes care of miter|round|bevel
+            $pdf->set_line_join($value); # PDFLib takes care of miter|round|bevel
         }
         elsif ($key eq 'stroke-width') {
-            $self->{pdf}->set_line_width($value);
+            $pdf->set_line_width($value);
         }
         elsif ($key eq 'stroke-miterlimit') {
-            $self->{pdf}->set_miter_limit($value);
+            $pdf->set_miter_limit($value);
         }
     }
 
@@ -720,7 +742,7 @@ sub process_css_styles {
 #    );
     foreach my $face (split(/\s*/, $new_font)) {
         eval {
-            $self->{pdf}->set_font(
+            $pdf->set_font(
                     face => $new_font,
                     italic => $italic,
                     bold => $bold,
@@ -748,14 +770,14 @@ sub slide_start_element {
 
     # transitions...
     if ( (!$self->{PrintMode}) &&
-        $name =~ /^(point|image|source[_-]code|table|col|row|circle|ellipse|rect|text|line)$/) {
+        $name =~ /^(point|image|source[_-]code|table|col|row|circle|ellipse|rect|text|line|path)$/) {
         if (exists($el->{Attributes}{"{}transition"})
-            || $self->{default_transition}) {
+            || @{$self->{default_transition}}) {
             # has a transition
             my $trans = $el->{Attributes}{"{}transition"};
             # default transition if unspecified (and not for table tags)
             if ( (!$trans) && ($name ne 'table') && ($name ne 'row') && ($name ne 'col') ) {
-                $trans = { Value => $self->{default_transition} };
+                $trans = { Value => $self->{default_transition}[0] };
             }
             if ($trans && ($trans->{Value} ne 'none') ) {
                 my @cache = @{$self->{cache_trash}};
@@ -787,9 +809,6 @@ sub slide_start_element {
         # if we do bullet/image transitions, make sure new pages don't use a transition
         $el->{Attributes}{"{}transition"}{Value} = "replace";
         $self->{extents} = [{ x => 0, w => 612 }];
-        if (exists($el->{Attributes}{"{}default-transition"})) {
-            $self->{default_transition} = $el->{Attributes}{"{}default-transition"}{Value};
-        }
     }
     elsif ($name eq 'title') {
         $self->gathered_text; # reset
@@ -902,7 +921,7 @@ sub slide_start_element {
     }
     elsif ($name eq 'image') {
         my $image = $self->{images}[$self->{image_id}];
-        my ($scale, $handle, $href) = 
+        my ($scale, $handle, $href) =
             ($image->{scale}, $image->{image_ref}, $image->{href});
         if (defined($image->{x}) && defined($image->{y})) {
             my $pdf = $self->{pdf};
@@ -955,6 +974,11 @@ sub slide_start_element {
 
         push @{$self->{colour_stack}}, [$r,$g,$b];
         $self->{bb}->set_color(rgb => [$r,$g,$b]);
+    }
+    elsif ($name eq 'span') {
+        my $prev = $self->{pdf}->get_parameter("fontname");
+        push @{$self->{font_stack}}, $prev;
+        $self->process_css_styles($el->{Attributes}{"{}style"}{Value}, 1);
     }
     elsif ($name eq 'rect') {
         my ($x, $y, $width, $height) = (
@@ -1065,6 +1089,451 @@ sub slide_start_element {
             $self->{pdf}->set_value(textrendering => 3); # invisible
         }
     }
+    elsif ($name eq 'path') {
+        my ($data) = (
+            $el->{Attributes}{"{}d"}{Value},
+            );
+        $self->{pdf}->save_graphics_state();
+        $self->process_css_styles($el->{Attributes}{"{}style"}{Value});
+        $self->process_path($data);
+    }
+}
+
+sub acos {
+    return atan2( sqrt(1 - $_[0]**2), $_[0] );
+}
+
+use constant PI => atan2(1, 1) * 4.0;
+
+sub convert_from_svg
+{
+    my ($x0, $y0, $rx, $ry, $phi, $large_arc, $sweep, $x, $y) = @_;
+    my ($cx, $cy, $theta, $delta);
+    
+    # a plethora of temporary variables 
+    my (
+        $dx2, $dy2, $phi_r, $x1, $y1,
+        $rx_sq, $ry_sq,
+        $x1_sq, $y1_sq,
+        $sign, $sq, $coef,
+        $cx1, $cy1, $sx2, $sy2,
+        $p, $n,
+        $ux, $uy, $vx, $vy
+    );
+        
+    # Compute 1/2 distance between current and final point
+    $dx2 = ($x0 - $x) / 2.0;
+    $dy2 = ($y0 - $y) / 2.0;
+
+    # Convert from degrees to radians
+    my $pi = atan2(1, 1) * 4.0;
+    $phi %= 360;
+    $phi_r = $phi * $pi / 180.0;
+
+    # Compute (x1, y1)
+    $x1 = cos($phi_r) * $dx2 + sin($phi_r) * $dy2;
+    $y1 = -sin($phi_r) * $dx2 + cos($phi_r) * $dy2;
+
+    # Make sure radii are large enough
+    $rx = abs($rx); $ry = abs($ry);
+    $rx_sq = $rx * $rx;
+    $ry_sq = $ry * $ry;
+    $x1_sq = $x1 * $x1;
+    $y1_sq = $y1 * $y1;
+
+    my $radius_check = ($x1_sq / $rx_sq) + ($y1_sq / $ry_sq);
+    if ($radius_check > 1)
+    {
+        $rx *= sqrt($radius_check);
+        $ry *= sqrt($radius_check);
+        $rx_sq = $rx * $rx;
+        $ry_sq = $ry * $ry;
+    }
+
+    # Step 2: Compute (cx1, cy1)
+
+    $sign = ($large_arc == $sweep) ? -1 : 1;
+    $sq = (($rx_sq * $ry_sq) - ($rx_sq * $y1_sq) - ($ry_sq * $x1_sq)) /
+        (($rx_sq * $y1_sq) + ($ry_sq * $x1_sq));
+    $sq = ($sq < 0) ? 0 : $sq;
+    $coef = ($sign * sqrt($sq));
+    $cx1 = $coef * (($rx * $y1) / $ry);
+    $cy1 = $coef * -(($ry * $x1) / $rx);
+
+    #   Step 3: Compute (cx, cy) from (cx1, cy1)
+
+    $sx2 = ($x0 + $x) / 2.0;
+    $sy2 = ($y0 + $y) / 2.0;
+
+    $cx = $sx2 + (cos($phi_r) * $cx1 - sin($phi_r) * $cy1);
+    $cy = $sy2 + (sin($phi_r) * $cx1 + cos($phi_r) * $cy1);
+
+    #   Step 4: Compute angle start and angle extent
+
+    $ux = ($x1 - $cx1) / $rx;
+    $uy = ($y1 - $cy1) / $ry;
+    $vx = (-$x1 - $cx1) / $rx;
+    $vy = (-$y1 - $cy1) / $ry;
+    $n = sqrt( ($ux * $ux) + ($uy * $uy) );
+    $p = $ux; # 1 * ux + 0 * uy
+    $sign = ($uy < 0) ? -1 : 1;
+
+    $theta = $sign * acos( $p / $n );
+    $theta = $theta * 180 / $pi;
+
+    $n = sqrt(($ux * $ux + $uy * $uy) * ($vx * $vx + $vy * $vy));
+    $p = $ux * $vx + $uy * $vy;
+    $sign = (($ux * $vy - $uy * $vx) < 0) ? -1 : 1;
+    $delta = $sign * acos( $p / $n );
+    $delta = $delta * 180 / $pi;
+
+    if ($sweep == 0 && $delta > 0)
+    {
+        $delta -= 360;
+    }
+    elsif ($sweep == 1 && $delta < 0)
+    {
+        $delta += 360;
+    }
+
+    #$delta -= 360 if $delta >= 360;
+    #$theta -= 360 if $theta >= 360;
+    # delta %= 360;
+    $theta %= 360;
+    
+    return ($cx, $cy, $rx, $ry, $theta, $delta, $phi);
+}
+
+sub process_path {
+    my $self = shift;
+    my ($data) = @_;
+    $data =~ s/^\s*//;
+    my @parts = split(/([A-Za-z])/, $data);
+    # warn("got: '", join("', '", @parts), "'\n");
+    shift(@parts); # get rid of junk at start
+    
+    my $relative = 0;
+
+    my ($xoffset, $yoffset) = map { $self->{pdf}->get_value($_) } qw(currentx currenty);
+
+    my ($last_reflect_x, $last_reflect_y, $need_to_close);
+
+    while (@parts) {
+        my $type = shift(@parts);
+        my $rest = shift(@parts);
+
+        if ($type eq lc($type)) {
+            # warn("using relative coordinates\n");
+            $relative++;
+        }
+
+        my @coords = grep { /^[\d\.\-]+$/ } split(/[^\d\.\-]+/, $rest||'');
+        # warn("got coords: '", join("', '", @coords), "'\n");
+
+        my ($x, $y);
+
+        if (lc($type) eq 'm') { # moveto
+            if (@coords % 2) {
+                warn("moveto coords must be in pairs, skipping.\n");
+                next;
+            }
+            
+            $need_to_close = 1;
+
+            ($x, $y) = splice(@coords, 0, 2);
+            if ($relative) {
+                $x += $xoffset;
+                $y += $yoffset;
+            }
+            # warn("move_to($x, $y)\n");
+            $self->{pdf}->move_to($x, $y);
+
+            if (@coords) {
+                # more coords == lines
+                unshift @parts, ($relative ? 'l' : 'L'), join(',', @coords);
+                next;
+            }
+            $xoffset = $x; $yoffset = $y;
+        }
+        elsif (lc($type) eq 'z') { # closepath
+            if ($self->{fill} && $self->{stroke}) {
+                $self->{pdf}->close_path_fill_stroke;
+            }
+            elsif ($self->{fill}) {
+                $self->{pdf}->close_path_fill;
+            }
+            elsif ($self->{stroke}) {
+                $self->{pdf}->close_path_stroke;
+            }
+        }
+        elsif (lc($type) eq 'l') { # lineto
+            if (@coords % 2) {
+                warn("moveto coords must be in pairs, skipping.\n");
+                next;
+            }
+
+            $need_to_close = 1;
+
+            while(@coords) {
+                ($x, $y) = splice(@coords, 0, 2);
+                # warn("line: $x, $y\n");
+                if ($relative) {
+                    $x += $xoffset;
+                    $y += $yoffset;
+                }
+                # warn("line_to($x, $y)\n");
+                $self->{pdf}->line_to($x, $y);
+            }
+            $xoffset = $x; $yoffset = $y;
+        }
+        elsif (lc($type) eq 'h') { # horizontal lineto
+            $need_to_close = 1;
+
+            while (@coords) {
+                $x = shift @coords;
+                if ($relative) {
+                    $x += $xoffset;
+                }
+                $self->{pdf}->line_to($x, $yoffset);
+            }
+            $xoffset = $x;
+        }
+        elsif (lc($type) eq 'v') { # vertical lineto
+            $need_to_close = 1;
+
+            while (@coords) {
+                $y = shift @coords;
+                if ($relative) {
+                    $y += $yoffset;
+                }
+                $self->{pdf}->line_to($xoffset, $y);
+            }
+            $yoffset = $y;
+        }
+        elsif (lc($type) eq 'c') { # curveto
+            if (@coords % 6) {
+                warn("curveto coords must be in 6's, skipping.\n");
+                next;
+            }
+            
+            $need_to_close = 1;
+
+            while (@coords) {
+                my ($x1, $y1, $x2, $y2, $x3, $y3) = splice(@coords, 0, 6);
+                if ($relative) {
+                    for ($x1, $x2, $x3) {
+                        $_ += $xoffset;
+                    }
+                    for ($y1, $y2, $y3) {
+                        $_ += $yoffset;
+                    }
+                }
+                $self->{pdf}->bezier(
+                    x1 => $x1, y1 => $y1,
+                    x2 => $x2, y2 => $y2,
+                    x3 => $x3, y3 => $y3,
+                    );
+                ($last_reflect_x, $last_reflect_y) = ($x2, $y2);
+                ($x, $y) = ($x3, $y3);
+            }
+            $xoffset = $x; $yoffset = $y;
+        }
+        elsif (lc($type) eq 's') { # shorthand/smooth curveto
+            if (@coords % 4) {
+                warn("shorthand curveto coords must be in 4's, skipping.\n");
+                next;
+            }
+            
+            $need_to_close = 1;
+
+            while (@coords) {
+                my ($x2, $y2, $x3, $y3) = splice(@coords, 0, 4);
+                if ($relative) {
+                    $x2 += $xoffset;
+                    $x3 += $xoffset;
+                    $y2 += $yoffset;
+                    $y3 += $yoffset;
+                }
+                my ($x1, $y1);
+                if (defined($last_reflect_x)) {
+                    $x1 = $xoffset - ($last_reflect_x - $xoffset);
+                    $y1 = $yoffset - ($last_reflect_y - $yoffset);
+                }
+                else {
+                    $x1 = $xoffset;
+                    $y1 = $yoffset;
+                }
+                $self->{pdf}->bezier(
+                    x1 => $x1, y1 => $y1,
+                    x2 => $x2, y2 => $y2,
+                    x3 => $x3, y3 => $y3,
+                    );
+                ($last_reflect_x, $last_reflect_y) = ($x2, $y2);
+                ($x, $y) = ($x3, $y3);
+            }
+            $xoffset = $x; $yoffset = $y;
+        }
+        elsif (lc($type) eq 'q') { # quadratic bezier curveto
+            if (@coords % 4) {
+                warn("quadratic curveto coords must be in 4's, skipping.\n");
+                next;
+            }
+            
+            $need_to_close = 1;
+
+            while (@coords) {
+                my ($x1, $y1, $x3, $y3) = splice(@coords, 0, 4);
+                if ($relative) {
+                    for ($x1, $x3) {
+                        $_ += $xoffset;
+                    }
+                    for ($y1, $y3) {
+                        $_ += $yoffset;
+                    }
+                }
+                my ($x2, $y2) = ($x1, $y1);
+                $self->{pdf}->bezier(
+                    x1 => $x1, y1 => $y1,
+                    x2 => $x2, y2 => $y2,
+                    x3 => $x3, y3 => $y3,
+                    );
+                ($last_reflect_x, $last_reflect_y) = ($x2, $y2);
+                ($x, $y) = ($x3, $y3);
+            }
+            $xoffset = $x; $yoffset = $y;
+        }
+        elsif (lc($type) eq 't') { # shorthand/smooth quadratic bezier curveto
+            if (@coords % 2) {
+                warn("shorthand quadratic curveto coords must be in pairs, skipping.\n");
+                next;
+            }
+            
+            $need_to_close = 1;
+
+            while (@coords) {
+                my ($x3, $y3) = splice(@coords, 0, 2);
+                if ($relative) {
+                    $x3 += $xoffset;
+                    $y3 += $yoffset;
+                }
+                my ($x1, $y1, $x2, $y2);
+                if (defined($last_reflect_x)) {
+                    $x1 = $xoffset - ($last_reflect_x - $xoffset);
+                    $y1 = $yoffset - ($last_reflect_y - $yoffset);
+                }
+                else {
+                    $x1 = $xoffset;
+                    $y1 = $yoffset;
+                }
+                ($x2, $y2) = ($x1, $y1);
+                $self->{pdf}->bezier(
+                    x1 => $x1, y1 => $y1,
+                    x2 => $x2, y2 => $y2,
+                    x3 => $x3, y3 => $y3,
+                    );
+                ($last_reflect_x, $last_reflect_y) = ($x2, $y2);
+                ($x, $y) = ($x3, $y3);
+            }
+            $xoffset = $x; $yoffset = $y;
+        }
+        elsif (lc($type) eq 'a') { # elliptical arc
+            if (@coords % 7) {
+                warn("elliptical arc coords must be in 7's, skipping.\n");
+                next;
+            }
+            
+            while (@coords) {
+                my ($rx, $ry, $rot, $large_arc_flag, $sweep_flag, $x2, $y2) =
+                    splice(@coords, 0, 7);
+
+                if ($relative) {
+                    $x2 += $xoffset;
+                    $y2 += $yoffset;
+                }
+
+                # warn("arc($xoffset,$yoffset $rest)\n");
+
+                my ($cx, $cy, $_rx, $_ry, $theta, $delta, $phi) =
+                    convert_from_svg(
+                                $xoffset, $yoffset, 
+                                $rx, $ry, 
+                                $rot, $large_arc_flag, $sweep_flag, 
+                                $x2, $y2);
+                
+                $delta = sprintf("%0.3f", $delta);
+                my $clockwise = abs($delta) < 180;
+                # warn("Theta: $theta\n", "Delta: $delta\n");
+                my $end_angle = $theta + $delta;
+
+                $end_angle %= 360;
+
+                # warn("actually doing arc: $cx,$cy $_rx,$_ry, $theta,$end_angle, $phi (cw: $clockwise)\n");
+
+                my $r = $_rx;
+                my $scale = $_ry / $r;
+                $cy /= $scale;
+
+                if ($need_to_close) {
+                    $self->{pdf}->line_to($xoffset, $yoffset);
+                    if ($self->{fill} && $self->{stroke}) {
+                        $self->{pdf}->fill_stroke;
+                    }
+                    elsif ($self->{fill}) {
+                        $self->{pdf}->fill;
+                    }
+                    elsif ($self->{stroke}) {
+                        $self->{pdf}->stroke;
+                    }
+                    $need_to_close = 0;
+                }
+
+                $self->{pdf}->save_graphics_state();
+                $self->{pdf}->coord_scale(1, $scale);
+                $self->{pdf}->coord_translate($cx, $cy);
+                # warn("rotating coords by $phi");
+                $self->{pdf}->coord_rotate($phi);
+
+                $self->{pdf}->arc(
+                    x => 0, y => 0,
+                    r => $r,
+                    alpha => $theta,
+                    beta => $end_angle,
+                    clockwise => $clockwise,
+                );
+
+                if ($self->{fill} && $self->{stroke}) {
+                    $self->{pdf}->fill_stroke;
+                }
+                elsif ($self->{fill}) {
+                    $self->{pdf}->fill;
+                }
+                elsif ($self->{stroke}) {
+                    $self->{pdf}->stroke;
+                }
+
+                $self->{pdf}->restore_graphics_state();
+                ($x, $y) = ($x2, $y2);
+                $self->{pdf}->move_to($x, $y);
+                $need_to_close=1;
+            }
+            $xoffset = $x; $yoffset = $y;
+        }
+        else {
+            warn("Unknown SVG path command: $type in $data");
+        }
+    }
+
+    if ($need_to_close) {
+        if ($self->{fill} && $self->{stroke}) {
+            $self->{pdf}->fill_stroke;
+        }
+        elsif ($self->{fill}) {
+            $self->{pdf}->fill;
+        }
+        elsif ($self->{stroke}) {
+            $self->{pdf}->stroke;
+        }
+    }
 }
 
 sub slide_end_element {
@@ -1110,7 +1579,7 @@ sub slide_end_element {
     elsif ($name eq 'slide') {
         $self->pop_bookmark unless $self->{transitional};
     }
-    elsif ($name eq 'i' || $name eq 'b') {
+    elsif ($name eq 'i' || $name eq 'b' || $name eq 'span') {
         my $font = pop @{$self->{font_stack}};
         $self->{bb}->set_font(face => $font);
     }
@@ -1155,7 +1624,7 @@ sub slide_end_element {
         # warn("resting font to: $font\n");
         $self->{pdf}->set_font(face => $font);
     }
-    elsif ($name =~ /^(circle|ellipse|line|rect)$/) {
+    elsif ($name =~ /^(circle|ellipse|line|rect|path)$/) {
         $self->{pdf}->restore_graphics_state();
     }
 }
