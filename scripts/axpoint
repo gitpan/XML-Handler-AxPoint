@@ -1,15 +1,33 @@
 #!/usr/bin/perl -w
-# $Id: axpoint,v 1.1 2002/02/06 17:47:54 matt Exp $
+# $Id: axpoint,v 1.2 2002/03/20 20:17:35 matt Exp $
 
 use strict;
 use XML::Handler::AxPoint;
 use XML::SAX;
+use Getopt::Std;
+use FindBin qw($Script);
+use vars qw($opt_p $opt_h);
+getopts('ph');
 
-my $source = shift(@ARGV) || die "No source file specified";
+usage() if $opt_h;
+
+my $source = shift(@ARGV) || usage();
 my $output = shift (@ARGV) || \*STDOUT;
 
 XML::SAX::ParserFactory->parser(
   Handler => XML::Handler::AxPoint->new(
-    Output => $output
+    Output => $output,
+    PrintMode => $opt_p,
     )
   )->parse_uri($source);
+
+sub usage {
+    print <<EOT;
+Usage: $Script [-p] source [output]
+
+  source    = source XML file containing presentation
+  output    = output PDF file (defaults to STDOUT)
+  -p        = print mode - no sub-slide transitions
+EOT
+    exit(1);
+}

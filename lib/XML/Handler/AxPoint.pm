@@ -1,19 +1,22 @@
-# $Id: AxPoint.pm,v 1.17 2002/03/07 23:29:11 matt Exp $
+# $Id: AxPoint.pm,v 1.26 2002/03/21 14:45:49 matt Exp $
 
 package XML::Handler::AxPoint;
 use strict;
 
 use XML::SAX::Writer;
+use File::Spec;
+use File::Basename;
 use PDFLib 0.11;
 
 use vars qw($VERSION);
-$VERSION = '1.2';
+$VERSION = '1.21';
 
 sub new {
     my $class = shift;
     my $opt   = (@_ == 1)  ? { %{shift()} } : {@_};
 
     $opt->{Output} ||= *{STDOUT}{IO};
+    $opt->{gathered_text} = '';
 
     return bless $opt, $class;
 }
@@ -116,6 +119,8 @@ sub new_page {
     $self->{pdf}->start_page;
 
     my $transition = $trans || $self->get_transition || 'replace';
+    $transition = 'replace' if $transition eq 'none';
+    $transition = 'replace' if $self->{PrintMode};
 
     $self->{pdf}->set_parameter(transition => lc($transition));
 
@@ -182,6 +187,9 @@ sub start_element {
     }
 
     my $name = $el->{LocalName};
+
+    # warn("start_ $name\n");
+
     if ($name eq 'slideshow') {
         $self->push_todo(sub { $self->new_page });
     }
@@ -241,6 +249,10 @@ sub start_element {
     }
     elsif ($name eq 'image') {
         $self->gathered_text;
+        if (exists($el->{Attributes}{"{http://www.w3.org/1999/xlink}href"})) {
+            # uses xlink, not characters
+            $self->characters($el->{Attributes}{"{http://www.w3.org/1999/xlink}href"}{Value});
+        }
     }
     elsif ($name =~ /(point|source[_-]code|i|b|colou?r|table|row|col|rect|circle|ellipse|polyline|line|path|text)/) {
       # passthrough to allow these types
@@ -265,6 +277,7 @@ sub end_element {
     }
 
     my $name = $el->{LocalName};
+    # warn("end_ $name\n");
     if ($name eq 'slideshow') {
         $self->run_todo;
         $self->pop_bookmark;
@@ -343,7 +356,11 @@ sub end_element {
         $self->{metadata}{link} = $self->gathered_text;
     }
     elsif ($name eq 'logo') {
-        my $logo_file = $self->gathered_text;
+        my $logo_file = 
+            File::Spec->rel2abs(
+                $self->gathered_text,
+                File::Basename::dirname($self->{locator}{SystemId})
+            );
         my $type = get_filetype($logo_file);
         my $logo = $self->{pdf}->load_image(
                 filename => $logo_file,
@@ -356,7 +373,11 @@ sub end_element {
         $self->{logo}{image} = $logo;
     }
     elsif ($name eq 'background') {
-        my $bg_file = $self->gathered_text;
+        my $bg_file =
+            File::Spec->rel2abs(
+                $self->gathered_text,
+                File::Basename::dirname($self->{locator}{SystemId})
+            );
         my $type = get_filetype($bg_file);
         my $bg = $self->{pdf}->load_image(
                 filename => $bg_file,
@@ -387,14 +408,32 @@ sub end_element {
         $self->run_todo;
     }
     elsif ($name eq 'image') {
-        my $image = $self->gathered_text;
+        my $image =
+            File::Spec->rel2abs(
+                $self->gathered_text,
+                File::Basename::dirname($self->{locator}{SystemId})
+            );
         my $image_ref = $self->{pdf}->load_image(
                 filename => $image,
                 filetype => get_filetype($image),
             );
         my $scale = $el->{Attributes}{"{}scale"}{Value} || 1.0;
         my $href = $el->{Attributes}{"{}href"}{Value};
-        push @{$self->{images}}, [$scale, $image_ref, $href];
+        my $x = $el->{Attributes}{"{}x"}{Value};
+        my $y = $el->{Attributes}{"{}y"}{Value};
+        my $width = $el->{Attributes}{"{}width"}{Value};
+        my $height = $el->{Attributes}{"{}height"}{Value};
+        
+        push @{$self->{images}}, 
+            {
+                scale => $scale,
+                image_ref => $image_ref,
+                href => $href,
+                x => $x,
+                y => $y,
+                width => $width,
+                height => $height,
+            };
     }
 
     $self->{Current} = $parent;
@@ -421,7 +460,8 @@ sub gathered_text {
 }
 
 sub image {
-    my ($pdf, $scale, $file_handle, $href) = @_;
+    my ($self, $scale, $file_handle, $href) = @_;
+    my $pdf = $self->{pdf};
 
     $pdf->print_line("");
 
@@ -435,13 +475,17 @@ sub image {
     $imgw *= $scale;
     $imgh *= $scale;
 
-    $pdf->add_image(img => $file_handle,
-            x => (612 / 2) - ($imgw / 2),
-            y => ($y - $imgh),
-            scale => $scale);
-    $pdf->add_link(link => $href, x => 20, y => $y - $imgh, w => 570, h => $imgh) if $href;
+    my $xpos = (($self->{extents}[0]{x} + ($self->{extents}[0]{w} / 2))
+                    - ($imgw / 2));
+    my $ypos = ($y - $imgh);
 
-    $pdf->set_text_pos($x, $y - $imgh);
+    $pdf->add_image(img => $file_handle,
+            x => $xpos,
+            y => $ypos,
+            scale => $scale);
+    $pdf->add_link(link => $href, x => $xpos, y => $ypos, w => $imgw, h => $imgh) if $href;
+
+    $pdf->set_text_pos($x, $ypos);
 }
 
 sub bullet {
@@ -700,21 +744,39 @@ sub slide_start_element {
 
     my $name = $el->{LocalName};
 
+    # warn("slide_start_ $name\n");
+
     # transitions...
-    if ($name =~ /(point|image|source[_-]code|col|row|circle|ellipse|rect|text|line)/) {
-        if (exists($el->{Attributes}{"{}transition"})) {
+    if ( (!$self->{PrintMode}) &&
+        $name =~ /^(point|image|source[_-]code|table|col|row|circle|ellipse|rect|text|line)$/) {
+        if (exists($el->{Attributes}{"{}transition"})
+            || $self->{default_transition}) {
             # has a transition
-            my $trans = delete $el->{Attributes}{"{}transition"};
-            my @cache = @{$self->{cache_trash}};
-            local $self->{cache} = \@cache;
-            local $self->{cache_trash};
-            # warn("playback on $el\n");
-            $self->{transitional} = 1;
-            local $el->{Parent}{Attributes}{"{}transition"}{Value} = $trans->{Value};
-            $self->playback_cache; # should get us back here.
-            $self->run_todo;
-            # warn("playback returns\n");
-            $self->{transitional} = 0;
+            my $trans = $el->{Attributes}{"{}transition"};
+            # default transition if unspecified (and not for table tags)
+            if ( (!$trans) && ($name ne 'table') && ($name ne 'row') && ($name ne 'col') ) {
+                $trans = { Value => $self->{default_transition} };
+            }
+            if ($trans && ($trans->{Value} ne 'none') ) {
+                my @cache = @{$self->{cache_trash}};
+                local $self->{cache} = \@cache;
+                local $self->{cache_trash};
+                # warn("playback on $el\n");
+                $self->{transitional} = 1;
+                my $parent = $el->{Parent};
+                while ($parent) {
+                    last if $parent->{LocalName} eq 'slide';
+                    $parent = $parent->{Parent};
+                }
+                die "No parent slide element" unless $parent;
+                local $parent->{Attributes}{"{}transition"}{Value} = $trans->{Value};
+                $self->playback_cache; # should get us back here.
+                $self->run_todo;
+                # make sure we don't transition this node again
+                $el->{Attributes}{"{}transition"}{Value} = 'none';
+                # warn("playback returns\n");
+                $self->{transitional} = 0;
+            }
         }
     }
 
@@ -725,6 +787,9 @@ sub slide_start_element {
         # if we do bullet/image transitions, make sure new pages don't use a transition
         $el->{Attributes}{"{}transition"}{Value} = "replace";
         $self->{extents} = [{ x => 0, w => 612 }];
+        if (exists($el->{Attributes}{"{}default-transition"})) {
+            $self->{default_transition} = $el->{Attributes}{"{}default-transition"}{Value};
+        }
     }
     elsif ($name eq 'title') {
         $self->gathered_text; # reset
@@ -744,6 +809,7 @@ sub slide_start_element {
         $self->{extents} = [{ %{$self->{extents}[0]} }, @{$self->{extents}}];
         $self->{col_widths} = [];
         my ($x, $y) = $self->{pdf}->get_text_pos;
+        $self->{pdf}->set_text_pos($self->{extents}[1]{x}, $y);
         $self->{max_height} = $y;
         $self->{row_number} = 0;
     }
@@ -819,7 +885,8 @@ sub slide_start_element {
         }
 
         if ($level == 1) {
-            $self->{pdf}->set_text_pos($self->{extents}[0]{x} + 80, $y);
+            my $indent = 80 * ($self->{extents}[0]{w} / $self->{extents}[-1]{w});
+            $self->{pdf}->set_text_pos($self->{extents}[0]{x} + $indent, $y);
         }
 
         my $size = $self->bullet($level);
@@ -835,14 +902,31 @@ sub slide_start_element {
     }
     elsif ($name eq 'image') {
         my $image = $self->{images}[$self->{image_id}];
-        my ($scale, $handle, $href) = @$image;
-        image($self->{pdf}, $scale, $handle, $href);
+        my ($scale, $handle, $href) = 
+            ($image->{scale}, $image->{image_ref}, $image->{href});
+        if (defined($image->{x}) && defined($image->{y})) {
+            my $pdf = $self->{pdf};
+            # TODO - use coords scaling to support width/height
+            $pdf->add_image(img => $handle,
+                x => $image->{x},
+                y => $image->{y},
+                scale => $scale
+            );
+        }
+        else {
+            $self->image($scale, $handle, $href);
+        }
     }
     elsif ($name eq 'source_code' || $name eq 'source-code') {
         my $size = $el->{Attributes}{"{}fontsize"}{Value} || 14;
         $self->{chars_ok} = 1;
-        $self->{pdf}->set_font(face => "Courier", size => $size);
+
         my ($x, $y) = $self->{pdf}->get_text_pos;
+        my $indent = 80 * ($self->{extents}[0]{w} / $self->{extents}[-1]{w});
+        $self->{pdf}->set_text_pos($self->{extents}[0]{x} + $indent, $y);
+
+        $self->{pdf}->set_font(face => "Courier", size => $size);
+        ($x, $y) = $self->{pdf}->get_text_pos;
         my $bb = $self->{pdf}->new_bounding_box(
             x => $x, y => $y, w => ($self->{extents}[0]{w} - ($x - $self->{extents}[0]{x})), h => (450 - $y),
             wrap => 0,
@@ -920,6 +1004,8 @@ sub slide_start_element {
             );
         my $r = $rx;
         my $scale = $ry / $r;
+        $cy /= $scale;
+        # warn("ellipse at $cx, $cy, scale: $scale, r: $r\n");
         $self->{pdf}->save_graphics_state();
         $self->process_css_styles($el->{Attributes}{"{}style"}{Value});
         $self->{pdf}->coord_scale(1, $scale);
@@ -986,18 +1072,19 @@ sub slide_end_element {
 
     my $name = $el->{LocalName};
 
+    # warn("slide_end_ $name\n");
+
     $el = $self->{SlideCurrent};
     $self->{SlideCurrent} = $el->{Parent};
 
-    if ($name eq 'title' || $name eq 'point' || $name eq 'source-code'
-        || $name eq 'source_code') {
+    if ($name =~ /^(title|point|source[_-]code)$/) {
         # finish bounding box
-        $self->{bb}->finish;
         my ($x, $y) = $self->{bb}->get_text_pos;
+        $self->{bb}->finish;
         $self->{pdf}->set_text_pos($self->{bb}->{x}, $y - 4);
-        delete $self->{bb};
+        my $bb = delete $self->{bb};
         $self->{pdf}->print_line("");
-    }
+    } 
 
     if ($name eq 'title') {
         # create bookmarks
@@ -1056,7 +1143,8 @@ sub slide_end_element {
         $self->{col_number}++;
         $self->{pdf}->print_line("");
         my ($x, $y) = $self->{pdf}->get_text_pos;
-        $self->{max_height} = $y if $y > $self->{max_height};
+        # warn("end-col: $y < $self->{max_height} ???");
+        $self->{max_height} = $y if $y < $self->{max_height};
     }
     elsif ($name eq 'text') {
         my $text = $self->gathered_text;
@@ -1243,9 +1331,27 @@ font - originally designed for source code.
 
 =head2 <image>
 
-The image tag allows you to place an image on the slide. It places the
-image at the current position, centered. The C<scale> attribute may be
-used to shrink or grow the image to fit.
+The image tag works in one of two ways. For backwards compatibility
+it allows you to specify the URI of the image in the text content
+of the tag:
+
+  <image>foo.png</image>
+
+Or for compatibility with SVG, you can use xlink:
+
+  <image xlink:href="foo.png"
+         xmlns:xlink="http://www.w3.org/1999/xlink"/>
+
+By default, the image is placed centered in the current column
+(which is the middle of the slide if you are not using tables) and
+at the current text position. However you can override this using
+x and y attributes for absolute positioning. You may also specify
+a scale attribute to scale the image. Currently absolute width
+and height values are not supported, but it is planned to support
+them.
+
+The supported image formats are those supported by the underlying
+pdflib library: gif, jpg, png and tiff.
 
 =head2 <colour> or <color>
 

@@ -1,4 +1,11 @@
 
+1.2.1
+    - Bug fixes in table support
+    - Improved layout
+    - Implemented "print mode" whereby transitions don't occur
+    - Implemented default-transition attribute to make transitions easier
+    - Implemented absolute image positioning
+
 1.2
     - Added table support
     - Added SVG vector graphics support

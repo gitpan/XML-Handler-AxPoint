@@ -23,7 +23,7 @@
     </source_code>
   </slide>
 
-  <slide>
+  <slide default-transition="replace">
     <title>Table Example</title>
     <table>
         <row>
